@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* small helpers */
+.chip { @apply rounded-full px-3 py-2 text-sm font-semibold transition-colors; }
+.btn  { @apply rounded-xl px-3 py-2 text-sm font-medium bg-neutral-900 text-white hover:bg-neutral-800 active:scale-[.99]; }
+.btn-ghost { @apply rounded-xl px-3 py-2 text-sm font-medium bg-transparent border border-neutral-300 hover:bg-neutral-100; }
+.card { @apply rounded-2xl bg-white shadow p-4; }
+.input { @apply rounded-xl border border-neutral-300 px-3 py-2 outline-none focus:ring-2 focus:ring-neutral-300; }
+label span { @apply text-xs text-neutral-500; }

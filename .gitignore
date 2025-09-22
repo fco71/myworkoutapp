@@ -8,6 +8,8 @@ build/
 # Environment variables
 .env
 .env.local
+.env.development
+.env.production
 
 # Editor directories and files
 .vscode/*
@@ -28,13 +30,22 @@ build/
 ehthumbs.db
 Thumbs.db
 
-# Project specific
-package-lock.json
-package.json
-postcss.config.js
-tailwind.config.js
-tsconfig.json
-tsconfig.node.json
-vite.config.ts
-src/
-.github/workflows/
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific (temporarily allowing access to these files)
+# package-lock.json
+# package.json
+# postcss.config.js
+# tailwind.config.js
+# tsconfig.json
+# tsconfig.node.json
+# vite.config.ts
+# src/
+# .github/workflows/
