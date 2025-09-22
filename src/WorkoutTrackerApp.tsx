@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Plus, Trash2, Check, RefreshCw, Save } from "lucide-react";
 
 // --- Types ---
-type WorkoutType = "Resistance" | "Cardio" | "Mobility" | "Other";
+type WorkoutType = "Bike" | "Calves" | "Resistance" | "Cardio" | "Mobility" | "Other";
 
 type WeeklyDay = {
   dateISO: string; // yyyy-mm-dd
@@ -18,8 +18,10 @@ type WeeklyDay = {
 
 type WeeklyPlan = {
   weekOfISO: string; // Monday of week
+  weekNumber: number; // Training week number
   days: WeeklyDay[]; // 7 days
   benchmarks: Partial<Record<WorkoutType, number>>; // target days per type
+  customTypes: WorkoutType[]; // User's custom workout types
 };
 
 type ResistanceExercise = {
@@ -32,7 +34,9 @@ type ResistanceExercise = {
 
 type ResistanceSession = {
   dateISO: string;
+  sessionName: string; // e.g., "Legs", "Upper Body"
   exercises: ResistanceExercise[];
+  completed: boolean;
 };
 
 // --- Utilities ---
@@ -73,18 +77,22 @@ function defaultWeekly(): WeeklyPlan {
   }));
   return {
     weekOfISO: toISO(monday),
+    weekNumber: 1,
     days,
-    benchmarks: { Resistance: 3, Cardio: 3, Mobility: 2, Other: 1 },
+    benchmarks: { Bike: 3, Calves: 2, Resistance: 3, Cardio: 2, Mobility: 2, Other: 1 },
+    customTypes: ["Bike", "Calves", "Resistance"],
   };
 }
 
 function defaultSession(): ResistanceSession {
   return {
     dateISO: toISO(new Date()),
+    sessionName: "Workout",
     exercises: [
       { id: crypto.randomUUID(), name: "Pull-ups", minSets: 3, targetReps: 6, sets: [0, 0, 0] },
       { id: crypto.randomUUID(), name: "Push-ups", minSets: 3, targetReps: 12, sets: [0, 0, 0] },
     ],
+    completed: false,
   };
 }
 
@@ -95,6 +103,8 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
   
   const counts = useMemo(() => {
     const c: Record<WorkoutType, number> = {
+      Bike: 0,
+      Calves: 0,
       Resistance: 0,
       Cardio: 0,
       Mobility: 0,
@@ -112,22 +122,41 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
   const weekProgress = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-      {/* Today's Progress */}
-      <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-blue-100 text-sm font-medium">Today</p>
-              <p className="text-3xl font-bold">{totalToday}</p>
-              <p className="text-blue-200 text-xs">workouts completed</p>
+    <div className="space-y-4 mb-8">
+      {/* Week Number */}
+      <div className="flex items-center justify-between">
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-lg shadow-lg">
+          <h2 className="text-2xl font-bold">Training Week {weekly.weekNumber}</h2>
+          <p className="text-blue-100 text-sm">Keep pushing your limits!</p>
+        </div>
+        <Button 
+          variant="outline" 
+          onClick={() => {
+            // Reset week number - this would need to be passed as a prop
+            console.log("Reset week number");
+          }}
+          className="bg-white/80 hover:bg-white"
+        >
+          Reset Week
+        </Button>
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {/* Today's Progress */}
+        <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-blue-100 text-sm font-medium">Today</p>
+                <p className="text-3xl font-bold">{totalToday}</p>
+                <p className="text-blue-200 text-xs">workouts completed</p>
+              </div>
+              <div className="w-12 h-12 bg-blue-400 rounded-full flex items-center justify-center">
+                <span className="text-2xl">🏋️</span>
+              </div>
             </div>
-            <div className="w-12 h-12 bg-blue-400 rounded-full flex items-center justify-center">
-              <span className="text-2xl">🏋️</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
 
       {/* Week Progress */}
       <Card className="bg-gradient-to-br from-indigo-500 to-indigo-600 text-white border-0 shadow-lg">
@@ -176,6 +205,7 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
           </div>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }
@@ -264,15 +294,15 @@ export default function WorkoutTrackerApp() {
         <Tabs defaultValue="week" className="">
           <TabsList className="grid grid-cols-2 w-full md:w-auto bg-white/80 backdrop-blur-sm border border-slate-200 shadow-sm">
             <TabsTrigger value="week" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">Weekly Tracker</TabsTrigger>
-            <TabsTrigger value="resistance" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">Resistance Session</TabsTrigger>
+            <TabsTrigger value="workout" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">Workout Session</TabsTrigger>
           </TabsList>
 
           <TabsContent value="week" className="mt-4">
             <WeeklyTracker weekly={weekly} setWeekly={setWeekly} onReset={resetWeek} />
           </TabsContent>
 
-          <TabsContent value="resistance" className="mt-4">
-            <ResistanceView session={session} setSession={setSession} onReset={resetSession} />
+          <TabsContent value="workout" className="mt-4">
+            <WorkoutView session={session} setSession={setSession} onReset={resetSession} weekly={weekly} setWeekly={setWeekly} />
           </TabsContent>
         </Tabs>
       </div>
@@ -346,10 +376,12 @@ function WeeklyTracker({
   setWeekly: (w: WeeklyPlan) => void;
   onReset: () => void;
 }) {
-  const types: WorkoutType[] = ["Resistance", "Cardio", "Mobility", "Other"];
+  const types = weekly.customTypes;
 
   const counts = useMemo(() => {
     const c: Record<WorkoutType, number> = {
+      Bike: 0,
+      Calves: 0,
       Resistance: 0,
       Cardio: 0,
       Mobility: 0,
@@ -361,7 +393,7 @@ function WeeklyTracker({
       });
     });
     return c;
-  }, [weekly.days]);
+  }, [weekly.days, types]);
 
   const monday = new Date(weekly.weekOfISO);
   const prettyRange = `${monday.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${
@@ -460,15 +492,19 @@ function WeeklyTracker({
   );
 }
 
-// --- Resistance Session ---
-function ResistanceView({
+// --- Workout Session ---
+function WorkoutView({
   session,
   setSession,
   onReset,
+  weekly,
+  setWeekly,
 }: {
   session: ResistanceSession;
   setSession: (s: ResistanceSession) => void;
   onReset: () => void;
+  weekly: WeeklyPlan;
+  setWeekly: (w: WeeklyPlan) => void;
 }) {
   const totalStats = useMemo(() => {
     const totalExercises = session.exercises.length;
@@ -528,15 +564,60 @@ function ResistanceView({
     });
   };
 
+  const completeWorkout = () => {
+    // Mark session as completed
+    setSession({ ...session, completed: true });
+    
+    // Auto-populate weekly tracker
+    const today = session.dateISO;
+    const todayIndex = weekly.days.findIndex(d => d.dateISO === today);
+    if (todayIndex !== -1) {
+      const updatedDays = [...weekly.days];
+      updatedDays[todayIndex] = {
+        ...updatedDays[todayIndex],
+        types: {
+          ...updatedDays[todayIndex].types,
+          Resistance: true
+        }
+      };
+      setWeekly({ ...weekly, days: updatedDays });
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <Card className="w-full">
+        <Card className="w-full bg-gradient-to-r from-slate-50 to-blue-50">
           <CardHeader>
-            <CardTitle>Resistance Session – {new Date(session.dateISO).toLocaleDateString()}</CardTitle>
+            <div className="flex items-center gap-4">
+              <div className="flex-1">
+                <Input
+                  value={session.sessionName}
+                  onChange={(e) => setSession({ ...session, sessionName: e.target.value })}
+                  className="text-xl font-bold border-0 bg-transparent p-0"
+                  placeholder="Workout name (e.g., Legs, Upper Body)"
+                />
+                <p className="text-sm text-slate-600 mt-1">
+                  {new Date(session.dateISO).toLocaleDateString('en-US', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="date"
+                  value={session.dateISO}
+                  onChange={(e) => setSession({ ...session, dateISO: e.target.value })}
+                  className="w-auto"
+                />
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-wrap items-center gap-3 text-sm text-neutral-600">
+            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
               <div><strong>Exercises:</strong> {totalStats.totalExercises}</div>
               <div>• <strong>Sets:</strong> {totalStats.totalSets}</div>
               <div>• <strong>Total reps:</strong> {totalStats.totalReps}</div>
@@ -564,6 +645,20 @@ function ResistanceView({
         <Button variant="secondary" onClick={onReset}>
           <RefreshCw className="mr-2 h-4 w-4" /> New session
         </Button>
+        {!session.completed && (
+          <Button 
+            onClick={completeWorkout}
+            className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white"
+          >
+            <Check className="mr-2 h-4 w-4" /> Complete Workout
+          </Button>
+        )}
+        {session.completed && (
+          <div className="flex items-center gap-2 text-green-600 font-semibold">
+            <Check className="h-4 w-4" />
+            Workout Completed!
+          </div>
+        )}
       </div>
     </div>
   );
@@ -591,9 +686,9 @@ function ExerciseCard({
   const totalTarget = ex.minSets * ex.targetReps;
   const goalMet = allFirstNMeet || sum >= totalTarget;
 
-  // Mock exercise history - in real app, this would come from Firestore
-  const lastWorkout = [6, 5, 4]; // Previous session
-  const personalRecord = [8, 7, 5]; // Best ever
+  // Exercise history - empty by default, populated from Firestore when available
+  const lastWorkout: number[] = []; // Will be populated from Firestore
+  const personalRecord: number[] = []; // Will be populated from Firestore
 
   return (
     <Card className={cn(
@@ -662,40 +757,46 @@ function ExerciseCard({
           Rule: individual set turns green when it ≥ target reps. Main card turns green when either the first <strong>min sets</strong> all meet target, or the <strong>sum of reps</strong> across all sets ≥ <em>min sets × target reps</em>.
         </div>
         
-        {/* Exercise History */}
-        <div className="mt-4 pt-4 border-t border-slate-200">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Last Workout */}
-            <div className="bg-slate-50 rounded-lg p-3">
-              <h4 className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-                Last Workout
-              </h4>
-              <div className="flex gap-2 flex-wrap">
-                {lastWorkout.map((reps, i) => (
-                  <div key={i} className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-medium">
-                    {reps}
+        {/* Exercise History - Only show if there's data */}
+        {(lastWorkout.length > 0 || personalRecord.length > 0) && (
+          <div className="mt-4 pt-4 border-t border-slate-200">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Last Workout */}
+              {lastWorkout.length > 0 && (
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <h4 className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
+                    Last Workout
+                  </h4>
+                  <div className="flex gap-2 flex-wrap">
+                    {lastWorkout.map((reps, i) => (
+                      <div key={i} className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-medium">
+                        {reps}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
-            
-            {/* Personal Record */}
-            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-lg p-3">
-              <h4 className="text-sm font-semibold text-amber-700 mb-2 flex items-center gap-2">
-                <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
-                Personal Record
-              </h4>
-              <div className="flex gap-2 flex-wrap">
-                {personalRecord.map((reps, i) => (
-                  <div key={i} className="bg-amber-100 text-amber-800 px-2 py-1 rounded text-sm font-medium">
-                    {reps}
+                </div>
+              )}
+              
+              {/* Personal Record */}
+              {personalRecord.length > 0 && (
+                <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-lg p-3">
+                  <h4 className="text-sm font-semibold text-amber-700 mb-2 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                    Personal Record
+                  </h4>
+                  <div className="flex gap-2 flex-wrap">
+                    {personalRecord.map((reps, i) => (
+                      <div key={i} className="bg-amber-100 text-amber-800 px-2 py-1 rounded text-sm font-medium">
+                        {reps}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
           </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   );
