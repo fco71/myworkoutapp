@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, addDoc, getDocs } from "firebase/firestore";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,7 @@ type ResistanceSession = {
   sessionName: string; // e.g., "Legs", "Upper Body"
   exercises: ResistanceExercise[];
   completed: boolean;
+  sessionTypes: WorkoutType[];
 };
 
 // --- Utilities ---
@@ -93,6 +94,7 @@ function defaultSession(): ResistanceSession {
       { id: crypto.randomUUID(), name: "Push-ups", minSets: 3, targetReps: 12, sets: [0, 0, 0] },
     ],
     completed: false,
+    sessionTypes: ["Resistance"],
   };
 }
 
@@ -573,13 +575,12 @@ function WorkoutView({
     const todayIndex = weekly.days.findIndex(d => d.dateISO === today);
     if (todayIndex !== -1) {
       const updatedDays = [...weekly.days];
-      updatedDays[todayIndex] = {
-        ...updatedDays[todayIndex],
-        types: {
-          ...updatedDays[todayIndex].types,
-          Resistance: true
-        }
-      };
+      const markTypes: WorkoutType[] = [...session.sessionTypes];
+      // if Bike is present, also mark Cardio implicitly
+      if (markTypes.includes("Bike") && !markTypes.includes("Cardio")) markTypes.push("Cardio");
+      const newTypes = { ...updatedDays[todayIndex].types } as Partial<Record<WorkoutType, boolean>>;
+      markTypes.forEach((t) => { newTypes[t] = true; });
+      updatedDays[todayIndex] = { ...updatedDays[todayIndex], types: newTypes };
       setWeekly({ ...weekly, days: updatedDays });
     }
   };
