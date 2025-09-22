@@ -298,7 +298,356 @@
             border-color: var(--gray-400);
         }
         
-        /* Rest Timer Modal */
+        /* Weekly Goals */
+.weekly-goals {
+    background: var(--bg-color);
+    border-radius: 12px;
+    padding: 15px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.goals-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.goals-header h3 {
+    margin: 0;
+    color: var(--text-color);
+}
+
+.icon-btn {
+    background: none;
+    border: none;
+    color: var(--gray-500);
+    cursor: pointer;
+    font-size: 1.1rem;
+    transition: color 0.2s;
+}
+
+.icon-btn:hover {
+    color: var(--primary-color);
+}
+
+.goals-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.goal-item {
+    background: var(--bg-color);
+    border-radius: 8px;
+    padding: 12px 15px;
+    border-left: 4px solid var(--primary-color);
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.goal-item.completed {
+    background: rgba(40, 167, 69, 0.05);
+    border-left-color: var(--success-color);
+}
+
+.goal-progress {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 5px;
+}
+
+.goal-bar {
+    flex-grow: 1;
+    height: 8px;
+    background: var(--gray-200);
+    border-radius: 4px;
+    margin: 0 10px;
+    overflow: hidden;
+}
+
+.goal-progress-fill {
+    height: 100%;
+    background: var(--primary-color);
+    border-radius: 4px;
+    transition: width 0.5s ease, background-color 0.3s;
+    min-width: 8px;
+}
+
+.goal-item.completed .goal-progress-fill {
+    background: var(--success-color);
+}
+
+.goal-count {
+    font-weight: 600;
+    color: var(--text-color);
+    min-width: 60px;
+    text-align: right;
+}
+
+.all-goals-complete {
+    margin-top: 15px;
+    padding: 10px;
+    background: rgba(40, 167, 69, 0.1);
+    border: 1px solid rgba(40, 167, 69, 0.2);
+    border-radius: 6px;
+    color: var(--success-color);
+    text-align: center;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.all-goals-complete i {
+    font-size: 1.2em;
+}
+
+/* Progress Tracking */
+        .progress-container {
+            background: var(--bg-color);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--text-color);
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: var(--gray-100);
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+            border-radius: 10px;
+            width: 0%;
+            transition: width 0.5s ease, background-color 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .progress-fill::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(
+                90deg,
+                rgba(255, 255, 255, 0.1) 0%,
+                rgba(255, 255, 255, 0.3) 50%,
+                rgba(255, 255, 255, 0.1) 100%
+            );
+            animation: shimmer 2s infinite linear;
+            background-size: 200% 100%;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+
+        /* Exercise completion styles */
+        .exercise.completed {
+            border-left: 4px solid var(--success-color);
+            background: rgba(40, 167, 69, 0.05);
+        }
+
+        .exercise.completed .exercise-title {
+            color: var(--success-color);
+            text-decoration: line-through;
+        }
+
+        .complete-exercise {
+            background: none;
+            border: 2px solid var(--gray-300);
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            cursor: pointer;
+            margin-right: 10px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+
+        .complete-exercise:hover {
+            border-color: var(--primary-color);
+        }
+
+        .complete-exercise.completed {
+            background-color: var(--success-color);
+            border-color: var(--success-color);
+            color: white;
+        }
+
+        .exercise-header {
+            display: flex;
+            align-items: center;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .stat-card {
+            background: var(--bg-color);
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--primary-color);
+            margin: 5px 0;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: var(--gray-500);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Modal Styles */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+.modal-content {
+    background: var(--bg-color);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 500px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.modal-header {
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: var(--text-color);
+}
+
+.close-modal {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--gray-500);
+}
+
+.modal-body {
+    padding: 20px;
+}
+
+.modal-footer {
+    padding: 15px 20px;
+    border-top: 1px solid var(--border-color);
+    text-align: right;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+    color: var(--text-color);
+}
+
+.form-group input[type="text"],
+.form-group input[type="number"] {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--input-bg);
+    color: var(--text-color);
+}
+
+.goal-template {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    margin-bottom: 15px;
+    padding: 15px;
+    background: var(--bg-color);
+    border-radius: 8px;
+    border: 1px dashed var(--border-color);
+}
+
+.goal-template .form-group {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.btn-remove-goal {
+    background: var(--danger-light);
+    color: var(--danger-color);
+    border: none;
+    border-radius: 6px;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-remove-goal:hover {
+    background: var(--danger-color);
+    color: white;
+}
+
+/* Rest Timer Modal */
         .rest-timer-modal {
             display: none;
             position: fixed;
@@ -642,7 +991,34 @@
 </head>
 <body>
     <div class="container">
-        <h1>Workout Tracker</h1>
+    <!-- Weekly Goals Container -->
+    <div class="weekly-goals">
+        <div class="goals-header">
+            <h3>Weekly Goals</h3>
+            <button id="editGoalsBtn" class="icon-btn" title="Edit Goals">
+                <i class="fas fa-cog"></i>
+            </button>
+        </div>
+        <div id="weeklyGoalsList" class="goals-list">
+            <!-- Goals will be dynamically inserted here -->
+        </div>
+        <div id="allGoalsComplete" class="all-goals-complete" style="display: none;">
+            <i class="fas fa-trophy"></i> All weekly goals completed!
+        </div>
+    </div>
+
+    <!-- Daily Progress Bar -->
+    <div class="progress-container">
+        <div class="progress-header">
+            <span>Today's Progress</span>
+            <span id="dailyProgressText">0% Complete</span>
+        </div>
+        <div class="progress-bar">
+            <div id="dailyProgress" class="progress-fill"></div>
+        </div>
+    </div>
+
+    <h1>Workout Tracker <span id="currentDate"></span></h1>
         <div class="tabs">
             <div class="tab active" onclick="showTab('workout')">Current Workout</div>
             <div class="tab" onclick="showTab('weekly')">Weekly Goals</div>
@@ -653,6 +1029,39 @@
         <button class="rest-timer-toggle" id="restTimerToggle">
             <i class="fas fa-clock"></i>
         </button>
+        
+        <!-- Settings Modal -->
+        <div id="goalsModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Edit Weekly Goals</h3>
+                    <button class="close-modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="goalTemplates">
+                        <div class="goal-template">
+                            <div class="form-group">
+                                <label>Goal Name</label>
+                                <input type="text" class="goal-name" placeholder="e.g., Bike Rides">
+                            </div>
+                            <div class="form-group">
+                                <label>Target Count</label>
+                                <input type="number" class="goal-target" min="1" value="3">
+                            </div>
+                            <button class="btn btn-remove-goal">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <button id="addGoalBtn" class="btn btn-secondary">
+                        <i class="fas fa-plus"></i> Add Goal
+                    </button>
+                </div>
+                <div class="modal-footer">
+                    <button id="saveGoalsBtn" class="btn btn-primary">Save Changes</button>
+                </div>
+            </div>
+        </div>
         
         <!-- Rest Timer Modal -->
         <div class="rest-timer-modal" id="restTimerModal">
@@ -923,27 +1332,50 @@
         
         // Show selected tab
         function showTab(tabName) {
+            console.log('Showing tab:', tabName);
+            
             // Hide all tab contents
-            document.querySelectorAll('.tab-content').forEach(tab => {
+            const tabContents = document.querySelectorAll('.tab-content');
+            tabContents.forEach(tab => {
                 tab.classList.remove('active');
             });
             
             // Deactivate all tabs
-            document.querySelectorAll('.tab').forEach(tab => {
+            const tabs = document.querySelectorAll('.tab');
+            tabs.forEach(tab => {
                 tab.classList.remove('active');
             });
             
-            // Show selected tab content
-            document.getElementById(`${tabName}-tab`).classList.add('active');
-            
-            // Activate selected tab
-            event.currentTarget.classList.add('active');
-            
-            // Update data if needed
-            if (tabName === 'weekly') {
-                updateWeeklySummary();
-            } else if (tabName === 'history') {
-                loadWeekData();
+            try {
+                // Show selected tab content and activate tab
+                const selectedTab = document.getElementById(`${tabName}-tab`);
+                const selectedTabButton = Array.from(tabs).find(tab => 
+                    tab.getAttribute('onclick')?.includes(`'${tabName}'`)
+                );
+                
+                if (selectedTab) {
+                    selectedTab.classList.add('active');
+                } else {
+                    console.error(`Tab content not found: ${tabName}-tab`);
+                }
+                
+                if (selectedTabButton) {
+                    selectedTabButton.classList.add('active');
+                } else {
+                    console.error(`Tab button not found for: ${tabName}`);
+                }
+                
+                // Update URL hash
+                window.location.hash = tabName;
+                
+                // Force a reflow to ensure transitions work
+                if (selectedTab) {
+                    void selectedTab.offsetWidth;
+                }
+                
+                console.log('Tab shown successfully');
+            } catch (error) {
+                console.error('Error showing tab:', error);
             }
         }
         
@@ -1060,8 +1492,9 @@
         
         function createExerciseElement(exercise) {
             const exerciseEl = document.createElement('div');
-            exerciseEl.className = 'exercise';
-            exerciseEl.dataset.id = exercise.id;
+            const isCompleted = completedExercises[exercise.id];
+            exerciseEl.className = `exercise ${isCompleted ? 'completed' : ''}`;
+            exerciseEl.id = `exercise-${exercise.id}`;
             
             let content = '';
             
@@ -1124,14 +1557,6 @@
             `;
             
             return exerciseEl;
-                
-                // Add "add set" button
-                const addSetBtn = document.createElement('button');
-                addSetBtn.className = 'add-set';
-                addSetBtn.textContent = '+';
-                addSetBtn.onclick = () => addSet(exercise.id);
-                setsContainer.appendChild(addSetBtn);
-            });
         }
         
         // Update weekly exercise counts
@@ -1313,46 +1738,425 @@
             return monday;
         }
         
-        // Rest Timer
-        let timerInterval;
-        let secondsRemaining = 90; // 1:30 default
-        let timerRunning = false;
-        const timerEndSound = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-alarm-digital-clock-beep-989.mp3');
-        timerEndSound.volume = 0.5;
+        // Weekly Goals Management
+        let weeklyGoals = JSON.parse(localStorage.getItem('weeklyGoals') || '[]');
         
-        // Initialize the app
-        document.addEventListener('DOMContentLoaded', function() {
-            // Load data
-            loadData();
+        // Timer variables will be initialized in setupRestTimer()
+
+        // Initialize the app when DOM is fully loaded
+        function initApp() {
+            console.log('Initializing app...');
             
-            // Initialize UI
+            // Load completed exercises
+            completedExercises = JSON.parse(localStorage.getItem('completedExercises') || '{}');
+            
+            // Set current date
+            const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            document.getElementById('currentDate').textContent = new Date().toLocaleDateString('en-US', dateOptions);
+
+            // Initialize UI components
+            setupTabs();
+            setupExerciseInputs();
+            setupRestTimer();
+            
+            // Load data and initialize UI
+            loadData();
+            checkAndResetGoals();
             renderExercises();
             updateWeeklyCounts();
             updateWeeklySummary();
             setupWeekSelector();
             
-            // Setup rest timer
-            setupRestTimer();
+            // Initialize weekly goals
+            initWeeklyGoals();
+            setupGoalModal();
             
-            // Set current date
-            const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-            document.getElementById('currentDate').textContent = new Date().toLocaleDateString('en-US', dateOptions);
+            // Initial progress update with small delay
+            setTimeout(updateProgress, 100);
             
-            // Add exercise on Enter key
-            document.getElementById('exerciseName').addEventListener('keypress', (e) => {
+            // Update progress every minute
+            setInterval(updateProgress, 60000);
+            
+            console.log('App initialized');
+        }
+        
+        // Setup tab switching
+        const setupTabs = () => {
+            const tabs = document.querySelectorAll('.tab');
+            if (tabs && tabs.length > 0) {
+                tabs.forEach(tab => {
+                    tab.addEventListener('click', () => {
+                        const tabName = tab.getAttribute('onclick').match(/'([^']+)'/)[1];
+                        showTab(tabName);
+                    });
+                });
+                showTab('workout');
+            }
+        };
+        
+        // Setup exercise input fields
+        function setupExerciseInputs() {
+            const exerciseName = document.getElementById('exerciseName');
+            const targetReps = document.getElementById('targetReps');
+            
+            const handleEnter = (e) => {
                 if (e.key === 'Enter') {
                     addExercise();
                 }
+            };
+            
+            exerciseName?.addEventListener('keypress', handleEnter);
+            targetReps?.addEventListener('keypress', handleEnter);
+            
+            // Setup add exercise button
+            const addExerciseBtn = document.querySelector('.add-exercise-btn');
+            addExerciseBtn?.addEventListener('click', addExercise);
+        }
+        
+        // Start the app when DOM is loaded
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initApp);
+        } else {
+            initApp();
+        }
+
+        // Weekly Goals Functions
+        const setupGoalModal = () => {
+            const modal = document.getElementById('goalsModal');
+            const editBtn = document.getElementById('editGoalsBtn');
+            const closeBtn = document.querySelector('.close-modal');
+            const addGoalBtn = document.getElementById('addGoalBtn');
+            const saveBtn = document.getElementById('saveGoalsBtn');
+            const templatesContainer = document.getElementById('goalTemplates');
+            
+            if (!editBtn || !closeBtn || !addGoalBtn || !saveBtn || !templatesContainer) {
+                console.error('Required elements not found for goal modal');
+                return;
+            }
+            
+            // Remove any existing event listeners to prevent duplicates
+            const newEditBtn = editBtn.cloneNode(true);
+            editBtn.parentNode.replaceChild(newEditBtn, editBtn);
+            
+            const newCloseBtn = closeBtn.cloneNode(true);
+            closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
+            
+            // Open modal
+            newEditBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                renderGoalTemplates();
+                modal.style.display = 'flex';
             });
             
-            document.getElementById('targetReps').addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    addExercise();
+            // Close modal
+            newCloseBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                modal.style.display = 'none';
+            });
+            
+            // Close modal when clicking outside
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.style.display = 'none';
                 }
             });
             
-            // Show workout tab by default
-            showTab('workout');
+            // Add new goal template
+            addGoalBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const template = document.createElement('div');
+                template.className = 'goal-template';
+                const templateContent = `
+                    <div class="form-group">
+                        <label>Goal Name</label>
+                        <input type="text" class="goal-name" placeholder="e.g., Cardio">
+                    </div>
+                    <div class="form-group">
+                        <label>Target Count</label>
+                        <input type="number" class="goal-target" min="1" value="1">
+                    </div>
+                    <button class="btn btn-remove-goal">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                `;
+                template.innerHTML = templateContent;
+                templatesContainer.appendChild(template);
+                
+                // Add remove button functionality
+                const removeBtn = template.querySelector('.btn-remove-goal');
+                if (removeBtn) {
+                    removeBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        template.remove();
+                    });
+                }
+            });
+            
+            // Save goals
+            saveBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const templates = document.querySelectorAll('.goal-template');
+                const newGoals = [];
+                
+                templates.forEach((template) => {
+                    const nameInput = template.querySelector('.goal-name');
+                    const targetInput = template.querySelector('.goal-target');
+                    
+                    if (nameInput && targetInput) {
+                        const name = nameInput.value.trim();
+                        const target = parseInt(targetInput.value) || 1;
+                        
+                        if (name) {
+                            // Try to match with existing goal to preserve current progress
+                            const existingGoal = weeklyGoals.find(g => g.name.toLowerCase() === name.toLowerCase());
+                            
+                            newGoals.push({
+                                id: name.toLowerCase().replace(/\s+/g, '-'),
+                                name: name,
+                                target: target,
+                                current: existingGoal ? existingGoal.current : 0
+                            });
+                        }
+                    }
+                });
+                
+                if (newGoals.length > 0) {
+                    weeklyGoals = newGoals;
+                    saveGoals();
+                    updateGoalsDisplay();
+                    modal.style.display = 'none';
+                } else {
+                    alert('Please add at least one valid goal.');
+                }
+            });
+            
+            // Close modal when clicking outside
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.style.display = 'none';
+                }
+            });
+        }
+
+function renderGoalTemplates() {
+    const container = document.getElementById('goalTemplates');
+    container.innerHTML = '';
+    
+    weeklyGoals.forEach(goal => {
+        const template = document.createElement('div');
+        template.className = 'goal-template';
+        template.innerHTML = `
+            <div class="form-group">
+                <label>Goal Name</label>
+                <input type="text" class="goal-name" value="${goal.name}">
+            </div>
+            <div class="form-group">
+                <label>Target Count</label>
+                <input type="number" class="goal-target" min="1" value="${goal.target}">
+            </div>
+            <button class="btn btn-remove-goal">
+                <i class="fas fa-trash"></i>
+            </button>
+        `;
+        container.appendChild(template);
+        
+        // Add remove button functionality
+        const removeBtn = template.querySelector('.btn-remove-goal');
+        removeBtn.addEventListener('click', () => {
+            template.remove();
+        });
+    });
+}
+
+function updateGoalsDisplay() {
+    const container = document.getElementById('weeklyGoalsList');
+    const allComplete = document.getElementById('allGoalsComplete');
+    container.innerHTML = '';
+    
+    if (weeklyGoals.length === 0) {
+        container.innerHTML = '<p>No goals set. Click the gear icon to add some!</p>';
+        allComplete.style.display = 'none';
+        return;
+    }
+    
+    let completedCount = 0;
+    
+    weeklyGoals.forEach(goal => {
+        const isComplete = goal.current >= goal.target;
+        if (isComplete) completedCount++;
+        
+        const progress = Math.min(100, (goal.current / goal.target) * 100);
+        
+        const goalEl = document.createElement('div');
+        goalEl.className = `goal-item ${isComplete ? 'completed' : ''}`;
+        goalEl.innerHTML = `
+            <div class="goal-name">${goal.name}</div>
+            <div class="goal-progress">
+                <div class="goal-bar">
+                    <div class="goal-progress-fill" style="width: ${progress}%"></div>
+                </div>
+                <div class="goal-count">${goal.current}/${goal.target}</div>
+            </div>
+        `;
+        container.appendChild(goalEl);
+    });
+    
+    // Show all complete message if all goals are met
+    allComplete.style.display = completedCount === weeklyGoals.length ? 'flex' : 'none';
+}
+
+function updateGoalProgress(goalId, increment = true) {
+    const goal = weeklyGoals.find(g => g.id === goalId);
+    if (goal) {
+        if (increment) {
+            goal.current = Math.min(goal.current + 1, goal.target);
+        } else {
+            goal.current = Math.max(0, goal.current - 1);
+        }
+        saveGoals();
+        updateGoalsDisplay();
+    }
+}
+
+function resetWeeklyGoals() {
+    const now = new Date();
+    const lastReset = localStorage.getItem('lastGoalReset');
+    const lastResetDate = lastReset ? new Date(lastReset) : null;
+    
+    // Reset every Sunday
+    const shouldReset = !lastResetDate || 
+                       (now.getDay() === 0 && 
+                       (!lastResetDate || now.toDateString() !== lastResetDate.toDateString()));
+    
+    if (shouldReset) {
+        weeklyGoals.forEach(goal => {
+            goal.current = 0;
+        });
+        saveGoals();
+        localStorage.setItem('lastGoalReset', now.toISOString());
+        updateGoalsDisplay();
+    }
+}
+
+function saveGoals() {
+    localStorage.setItem('weeklyGoals', JSON.stringify(weeklyGoals));
+}
+
+// Call this when an exercise is completed
+function updateExerciseGoals(exercise) {
+    // Example: Increment bike rides goal when a bike exercise is completed
+    if (exercise.name.toLowerCase().includes('bike')) {
+        updateGoalProgress('bike');
+    }
+    
+    // Add more conditions for other goal types
+    // Example: Increment resistance training goal
+    if (exercise.type === 'resistance') {
+        updateGoalProgress('resistance');
+    }
+    
+    // Example: Increment muscle group goal
+    if (exercise.muscleGroup) {
+        updateGoalProgress('muscle');
+    }
+}
+
+// Call this when initializing the app
+function checkAndResetGoals() {
+    resetWeeklyGoals();
+}
+
+// Add this to your exercise completion logic
+function onExerciseCompleted(exercise) {
+    updateExerciseGoals(exercise);
+    // ... rest of your completion logic
+}
+
+// Animation keyframes
+if (!document.getElementById('pulse-animation')) {
+    const style = document.createElement('style');
+    style.id = 'pulse-animation';
+    style.textContent = `
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+// Rest Timer variables
+let timerInterval;
+let secondsRemaining = 90; // 1:30 default
+let timerRunning = false;
+const timerEndSound = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-alarm-digital-clock-beep-989.mp3');
+timerEndSound.volume = 0.5;
+            setInterval(updateProgress, 60000);
+            
+            // Track completed exercises
+            let completedExercises = JSON.parse(localStorage.getItem('completedExercises') || '{}');
+            
+            // Update progress bars
+            function updateProgress() {
+                const today = new Date().toDateString();
+                const weekStart = getWeekStartDate().toDateString();
+                
+                // Calculate daily progress
+                const todayExercises = exercises.filter(ex => new Date(ex.date).toDateString() === today);
+                const completedToday = todayExercises.filter(ex => completedExercises[ex.id]).length;
+                const dailyProgress = todayExercises.length > 0 ? (completedToday / todayExercises.length) * 100 : 0;
+                
+                // Update daily progress bar
+                document.getElementById('dailyProgress').style.width = `${dailyProgress}%`;
+                document.getElementById('dailyProgressText').textContent = `${Math.round(dailyProgress)}% Complete`;
+                
+                // Calculate weekly progress
+                const weekExercises = exercises.filter(ex => {
+                    const exDate = new Date(ex.date);
+                    return exDate >= getWeekStartDate() && exDate <= new Date();
+                });
+                const completedThisWeek = weekExercises.filter(ex => completedExercises[ex.id]).length;
+                const weeklyGoal = 5; // 5 workouts per week goal
+                const weeklyProgress = Math.min(100, (completedThisWeek / weeklyGoal) * 100);
+                
+                // Update weekly progress bar
+                document.getElementById('weeklyProgress').style.width = `${weeklyProgress}%`;
+                document.getElementById('weeklyProgressText').textContent = `${completedThisWeek}/${weeklyGoal} workouts`;
+                
+                // Update progress bar color based on completion
+                const progressBars = document.querySelectorAll('.progress-fill');
+                progressBars.forEach(bar => {
+                    const width = parseInt(bar.style.width) || 0;
+                    if (width >= 100) {
+                        bar.style.background = 'linear-gradient(90deg, var(--success-color), #4caf50)';
+                    } else if (width > 50) {
+                        bar.style.background = 'linear-gradient(90deg, var(--primary-color), var(--secondary-color))';
+                    } else {
+                        bar.style.background = 'linear-gradient(90deg, #ff9800, #ff5722)';
+                    }
+                });
+            }
+            
+            // Toggle exercise completion
+            function toggleExerciseCompletion(exerciseId) {
+                if (completedExercises[exerciseId]) {
+                    delete completedExercises[exerciseId];
+                } else {
+                    completedExercises[exerciseId] = true;
+                }
+                localStorage.setItem('completedExercises', JSON.stringify(completedExercises));
+                updateProgress();
+                renderExercises();
+            }
+            
+            // Get the start of the current week (Sunday)
+            function getWeekStartDate() {
+                const date = new Date();
+                const day = date.getDay();
+                const diff = date.getDate() - day; // Adjust when week starts on Sunday
+                return new Date(date.setDate(diff));
+            }
             
             // Show a specific tab
             function showTab(tabName) {
@@ -1583,7 +2387,6 @@
             // Set default time to 1:30 and update display
             setRestTime(90);
             updateRestTimerDisplay();
-        });
     </script>
 </body>
 </html>
