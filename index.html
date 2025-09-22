@@ -781,21 +781,26 @@
         document.addEventListener('DOMContentLoaded', () => {
             // Check if user is already signed in
             window.firebaseAuth.onAuthStateChanged((user) => {
+                const authContainer = document.querySelector('.auth-container');
+                const appContainer = document.getElementById('app-container');
+                
                 if (user) {
                     // User is signed in
-                    document.getElementById('login-container').style.display = 'none';
-                    document.getElementById('app-container').style.display = 'block';
+                    if (authContainer) authContainer.style.display = 'none';
+                    if (appContainer) appContainer.style.display = 'block';
                     
                     // Update user info in the UI
-                    document.getElementById('user-name').textContent = user.displayName || 'User';
-                    document.getElementById('user-email').textContent = user.email || '';
+                    const userName = document.getElementById('user-name');
+                    const userEmail = document.getElementById('user-email');
+                    if (userName) userName.textContent = user.displayName || 'User';
+                    if (userEmail) userEmail.textContent = user.email || '';
                     
                     // Load user data from Firestore
                     loadUserData(user.uid);
                 } else {
                     // No user is signed in
-                    document.getElementById('login-container').style.display = 'flex';
-                    document.getElementById('app-container').style.display = 'none';
+                    if (authContainer) authContainer.style.display = 'flex';
+                    if (appContainer) appContainer.style.display = 'none';
                     
                     // Reset forms
                     const loginForm = document.getElementById('login-form');
@@ -806,19 +811,17 @@
                     // Clear error messages
                     const errorMessages = document.querySelectorAll('.error-message');
                     errorMessages.forEach(el => el.textContent = '');
+                    
+                    // Show login form by default
+                    if (loginForm && signupForm) {
+                        loginForm.style.display = 'block';
+                        signupForm.style.display = 'none';
+                    }
                 }
             });
             
             // Add event listeners for login/signup forms
             setupAuthForms();
-            
-            // Show login form by default
-            const loginForm = document.getElementById('login-form');
-            const signupForm = document.getElementById('signup-form');
-            if (loginForm && signupForm) {
-                loginForm.style.display = 'block';
-                signupForm.style.display = 'none';
-            }
         });
     </script>
 </body>
