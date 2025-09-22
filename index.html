@@ -1,14 +1,752 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="refresh" content="0; url=workout-tracker.html">
-    <title>Redirecting to Workout Tracker</title>
-    <script>
-        window.location.href = 'workout-tracker.html';
-    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Workout Dashboard</title>
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-light: #818cf8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-400: #9ca3af;
+            --gray-600: #4b5563;
+            --gray-700: #374151;
+            --gray-800: #1f2937;
+            --gray-900: #111827;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --transition: all 0.2s ease-in-out;
+        }
+
+        /* Login Styles */
+        .login-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+            padding: 20px;
+        }
+
+        .login-box {
+            background: white;
+            padding: 2.5rem;
+            border-radius: 12px;
+            box-shadow: var(--shadow-lg);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .login-box h2 {
+            margin-bottom: 1.5rem;
+            color: var(--gray-900);
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+            text-align: left;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--gray-300);
+            border-radius: 6px;
+            font-size: 1rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 6px;
+            font-weight: 500;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 0.75rem;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #4338ca;
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: var(--gray-100);
+            color: var(--gray-800);
+        }
+
+        .btn-secondary:hover {
+            background: var(--gray-200);
+            transform: translateY(-1px);
+        }
+
+        .btn-google {
+            background: white;
+            color: var(--gray-700);
+            border: 1px solid var(--gray-300);
+        }
+
+        .btn-google:hover {
+            background: var(--gray-50);
+            transform: translateY(-1px);
+        }
+
+        .btn i {
+            margin-right: 0.5rem;
+        }
+
+        .error-message {
+            color: var(--danger);
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            margin-bottom: 1.25rem;
+            display: none;
+            font-size: 0.875rem;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: #f8fafc;
+            color: var(--gray-900);
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        .nav-links a {
+            margin-left: 1.5rem;
+            text-decoration: none;
+            color: var(--gray-700);
+            font-weight: 500;
+            transition: var(--transition);
+        }
+
+        .nav-links a:hover {
+            color: var(--primary);
+        }
+
+        /* Hero Section */
+        .hero {
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            color: white;
+            padding: 3rem 2rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .hero h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .hero p {
+            opacity: 0.9;
+            margin-bottom: 1.5rem;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: var(--shadow);
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-label {
+            color: var(--gray-700);
+            font-size: 0.9rem;
+        }
+
+        /* Progress Section */
+        .progress-section {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: var(--shadow);
+            margin-bottom: 2rem;
+        }
+
+        .section-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            color: var(--gray-900);
+        }
+
+        .progress-bar {
+            height: 10px;
+            background-color: var(--gray-100);
+            border-radius: 5px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background-color: var(--primary);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+    </style>
 </head>
 <body>
-    <p>If you are not redirected automatically, <a href="workout-tracker.html">click here</a>.</p>
+    <!-- Login Container (initially visible) -->
+    <div id="login-container" class="login-container" style="display: flex;">
+        <div class="login-box">
+            <h2>Welcome to Workout Tracker</h2>
+            
+            <!-- Login Form -->
+            <form id="login-form" class="auth-form">
+                <div id="login-error" class="error-message"></div>
+                <div class="form-group">
+                    <input type="email" id="email" placeholder="Email" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="password" placeholder="Password" class="form-input" required>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%; margin-bottom: 1rem;">Sign In</button>
+            </form>
+            
+            <!-- Signup Form (initially hidden) -->
+            <form id="signup-form" class="auth-form" style="display: none;">
+                <div id="signup-error" class="error-message"></div>
+                <div class="form-group">
+                    <input type="text" id="display-name" placeholder="Full Name" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <input type="email" id="signup-email" placeholder="Email" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="signup-password" placeholder="Password (min 6 characters)" class="form-input" minlength="6" required>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%; margin-bottom: 1rem;">Create Account</button>
+            </form>
+            
+            <!-- Toggle between login and signup -->
+            <div style="text-align: center; margin: 1rem 0;">
+                <a href="#" id="toggle-auth-form" style="color: var(--primary); text-decoration: none;">
+                    Don't have an account? Sign up
+                </a>
+            </div>
+            
+            <!-- Google Sign In -->
+            <div style="text-align: center; margin-top: 1.5rem; position: relative;">
+                <div style="height: 1px; background-color: var(--gray-300); margin: 1.5rem 0; position: relative;">
+                    <span style="background: white; padding: 0 1rem; position: relative; top: -0.7rem; color: var(--gray-500);">OR</span>
+                </div>
+                <button id="google-signin" class="btn btn-google" style="width: 100%;">
+                    <i class="fab fa-google"></i> Sign in with Google
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Exercise Modal -->
+    <div id="exerciseModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="exerciseModalTitle">Add New Exercise</h3>
+                <button class="close-modal" onclick="document.getElementById('exerciseModal').classList.add('hidden')">&times;</button>
+            </div>
+            <form id="exerciseForm" onsubmit="event.preventDefault();">
+                <input type="hidden" id="exerciseId" name="exerciseId" value="">
+                
+                <div class="form-group">
+                    <label for="exerciseName">Exercise Name*</label>
+                    <input type="text" id="exerciseName" name="exerciseName" required>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="exerciseType">Type</label>
+                        <select id="exerciseType" name="exerciseType">
+                            <option value="strength">Strength</option>
+                            <option value="cardio">Cardio</option>
+                            <option value="flexibility">Flexibility</option>
+                            <option value="warmup">Warm-up</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="exerciseMuscleGroup">Muscle Group</label>
+                        <select id="exerciseMuscleGroup" name="exerciseMuscleGroup">
+                            <option value="">Select...</option>
+                            <option value="chest">Chest</option>
+                            <option value="back">Back</option>
+                            <option value="shoulders">Shoulders</option>
+                            <option value="biceps">Biceps</option>
+                            <option value="triceps">Triceps</option>
+                            <option value="legs">Legs</option>
+                            <option value="core">Core</option>
+                            <option value="full-body">Full Body</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="exerciseDescription">Description</label>
+                    <textarea id="exerciseDescription" name="exerciseDescription" rows="3"></textarea>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="document.getElementById('exerciseModal').classList.add('hidden')">
+                        Cancel
+                    </button>
+                    <button type="submit" id="saveExerciseBtn" class="btn-primary">
+                        Save Exercise
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Workout Modal -->
+    <div id="workoutModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="workoutModalTitle">Create New Workout</h3>
+                <button class="close-modal" onclick="document.getElementById('workoutModal').classList.add('hidden')">&times;</button>
+            </div>
+            <form id="workoutForm" onsubmit="event.preventDefault();">
+                <input type="hidden" id="workoutId" name="workoutId" value="">
+                
+                <div class="form-group">
+                    <label for="workoutName">Workout Name*</label>
+                    <input type="text" id="workoutName" name="workoutName" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="workoutDescription">Description</label>
+                    <textarea id="workoutDescription" name="workoutDescription" rows="2"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>Exercises</label>
+                    <select id="workoutExercises" name="workoutExercises" multiple size="8" class="select-multiple">
+                        <!-- Exercises will be loaded here -->
+                    </select>
+                    <p class="hint">Hold Ctrl/Cmd to select multiple exercises</p>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="document.getElementById('workoutModal').classList.add('hidden')">
+                        Cancel
+                    </button>
+                    <button type="submit" id="saveWorkoutBtn" class="btn-primary">
+                        Save Workout
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main App Container (initially hidden) -->
+    <div id="app-container" class="container" style="display: none;">
+        <!-- Header -->
+        <header class="header">
+            <a href="#" class="logo">FitTrack</a>
+            <nav class="nav-links">
+                <a href="workout-tracker.html">Workout Tracker</a>
+                <a href="#">Progress</a>
+                <a href="#">History</a>
+                <a href="#">Profile</a>
+            </nav>
+        </header>
+
+        <!-- Hero Section -->
+        <section class="hero">
+            <h1>Welcome back, <span id="userName">Athlete</span>! 👋</h1>
+            <p>Track your fitness journey and achieve your goals</p>
+            <a href="workout-tracker.html" class="btn btn-primary">
+                <i class="fas fa-plus btn-icon"></i> Start New Workout
+            </a>
+        </section>
+
+        <!-- Stats Overview -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="workoutsThisWeek">0</div>
+                <div class="stat-label">Workouts This Week</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="totalWorkouts">0</div>
+                <div class="stat-label">Total Workouts</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="weeklyGoalProgress">0%</div>
+                <div class="stat-label">Weekly Goal</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="streakDays">0</div>
+                <div class="stat-label">Day Streak</div>
+            </div>
+        </div>
+
+        <!-- Progress Section -->
+        <section class="progress-section">
+            <h2 class="section-title">Weekly Progress</h2>
+            
+            <div class="progress-item">
+                <div class="flex justify-between mb-1">
+                    <span>Strength Training</span>
+                    <span id="strengthProgress">0%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="strengthBar" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="progress-item mt-4">
+                <div class="flex justify-between mb-1">
+                    <span>Cardio</span>
+                    <span id="cardioProgress">0%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="cardioBar" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="progress-item mt-4">
+                <div class="flex justify-between mb-1">
+                    <span>Flexibility</span>
+                    <span id="flexibilityProgress">0%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="flexibilityBar" style="width: 0%"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Workout Management Header -->
+            <div class="section-header">
+                <h2>My Workouts</h2>
+                <div class="header-actions">
+                    <button id="createWorkoutBtn" class="btn-primary">
+                        <i class="fas fa-plus"></i> Create Workout
+                    </button>
+                    <button id="addExerciseBtn" class="btn-secondary">
+                        <i class="fas fa-dumbbell"></i> Manage Exercises
+                    </button>
+                </div>
+            </div>
+
+            <!-- Workout List -->
+            <div id="workoutListContainer">
+                <div id="workoutList" class="workout-grid">
+                    <!-- Workouts will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Current Workout View (initially hidden) -->
+            <div id="currentWorkoutContainer" class="hidden">
+                <div class="workout-header">
+                    <h2 id="currentWorkoutName">Workout Name</h2>
+                    <div class="workout-timer">
+                        <span id="workoutTimer">00:00:00</span>
+                    </div>
+                </div>
+                <div id="currentWorkoutExercises">
+                    <!-- Workout exercises will be loaded here -->
+                </div>
+                <div class="workout-actions">
+                    <button id="finishWorkoutBtn" class="btn-primary">Finish Workout</button>
+                    <button id="cancelWorkoutBtn" class="btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- User Profile -->
+        <div class="user-profile">
+            <img src="https://via.placeholder.com/40" alt="User" class="user-avatar" id="user-avatar">
+            <div class="user-info">
+                <span class="user-name" id="user-name">Loading...</span>
+                <span class="user-email" id="user-email">Loading...</span>
+            </div>
+            <button class="sign-out-btn" id="sign-out-button">
+                <i class="fas fa-sign-out-alt"></i>
+            </button>
+        </div>
+
+        <!-- Recent Activities -->
+        <section class="progress-section">
+            <h2 class="section-title">Recent Activities</h2>
+            <ul class="activity-list" id="recentActivities">
+                <li class="activity-item">
+                    <span class="activity-name">No recent activities</span>
+                </li>
+            </ul>
+        </section>
+    </div>
+
+    <!-- App Scripts -->
+    <script>
+        // Toggle between login and signup forms
+        function toggleAuthForms() {
+            const loginForm = document.getElementById('login-form');
+            const signupForm = document.getElementById('signup-form');
+            const toggleLink = document.getElementById('toggle-auth-form');
+            
+            if (loginForm.style.display === 'none') {
+                // Show login, hide signup
+                loginForm.style.display = 'block';
+                signupForm.style.display = 'none';
+                toggleLink.textContent = "Don't have an account? Sign up";
+            } else {
+                // Show signup, hide login
+                loginForm.style.display = 'none';
+                signupForm.style.display = 'block';
+                toggleLink.textContent = 'Already have an account? Sign in';
+            }
+        }
+
+        // Function to load user data from Firestore
+        async function loadUserData(userId) {
+            try {
+                const userDoc = await window.firebaseAuth.db.collection('users').doc(userId).get();
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    
+                    // Update UI with user data
+                    document.getElementById('user-name').textContent = userData.displayName || 'User';
+                    document.getElementById('user-email').textContent = userData.email || '';
+                    
+                    // Initialize charts with user data
+                    initializeCharts(userData);
+                }
+            } catch (error) {
+                console.error('Error loading user data:', error);
+            }
+        }
+
+        // Initialize charts with user data
+        function initializeCharts(userData) {
+            console.log('Initializing charts with user data:', userData);
+            // Chart initialization code would go here
+        }
+
+        // Set up authentication form event listeners
+        function setupAuthForms() {
+            // Toggle between login and signup forms
+            const toggleLink = document.getElementById('toggle-auth-form');
+            if (toggleLink) {
+                toggleLink.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    toggleAuthForms();
+                });
+            }
+
+            // Handle login form submission
+            const loginForm = document.getElementById('login-form');
+            if (loginForm) {
+                loginForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const email = document.getElementById('email').value;
+                    const password = document.getElementById('password').value;
+                    const errorElement = document.getElementById('login-error');
+                    
+                    // Show loading state
+                    const submitBtn = loginForm.querySelector('button[type="submit"]');
+                    const originalBtnText = submitBtn.innerHTML;
+                    submitBtn.disabled = true;
+                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Signing in...';
+                    
+                    try {
+                        await window.firebaseAuth.signInWithEmail(email, password);
+                        // The auth state change handler will update the UI
+                    } catch (error) {
+                        console.error('Login error:', error);
+                        errorElement.textContent = error.message;
+                        submitBtn.disabled = false;
+                        submitBtn.innerHTML = originalBtnText;
+                    }
+                });
+            }
+
+            // Handle signup form submission
+            const signupForm = document.getElementById('signup-form');
+            if (signupForm) {
+                signupForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const email = document.getElementById('signup-email').value;
+                    const password = document.getElementById('signup-password').value;
+                    const displayName = document.getElementById('display-name').value;
+                    const errorElement = document.getElementById('signup-error');
+                    
+                    // Show loading state
+                    const submitBtn = signupForm.querySelector('button[type="submit"]');
+                    const originalBtnText = submitBtn.innerHTML;
+                    submitBtn.disabled = true;
+                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating account...';
+                    
+                    try {
+                        await window.firebaseAuth.signUpWithEmail(email, password, displayName);
+                        // The auth state change handler will update the UI
+                    } catch (error) {
+                        console.error('Signup error:', error);
+                        errorElement.textContent = error.message;
+                        submitBtn.disabled = false;
+                        submitBtn.innerHTML = originalBtnText;
+                    }
+                });
+            }
+
+            // Handle Google Sign In
+            const googleSignInBtn = document.getElementById('google-signin');
+            if (googleSignInBtn) {
+                googleSignInBtn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    try {
+                        await window.firebaseAuth.signInWithGoogle();
+                        // The auth state change handler will update the UI
+                    } catch (error) {
+                        console.error('Google sign in error:', error);
+                        const errorElement = document.getElementById('login-error') || 
+                                          document.getElementById('signup-error');
+                        if (errorElement) {
+                            errorElement.textContent = error.message;
+                        }
+                    }
+                });
+            }
+
+            // Handle sign out
+            const signOutBtn = document.getElementById('sign-out-btn');
+            if (signOutBtn) {
+                signOutBtn.addEventListener('click', async () => {
+                    try {
+                        await window.firebaseAuth.signOut();
+                    } catch (error) {
+                        console.error('Sign out error:', error);
+                    }
+                });
+            }
+        }
+
+        // Check auth state when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            // Check if user is already signed in
+            window.firebaseAuth.onAuthStateChanged((user) => {
+                if (user) {
+                    // User is signed in
+                    document.getElementById('login-container').style.display = 'none';
+                    document.getElementById('app-container').style.display = 'block';
+                    
+                    // Update user info in the UI
+                    document.getElementById('user-name').textContent = user.displayName || 'User';
+                    document.getElementById('user-email').textContent = user.email || '';
+                    
+                    // Load user data from Firestore
+                    loadUserData(user.uid);
+                } else {
+                    // No user is signed in
+                    document.getElementById('login-container').style.display = 'flex';
+                    document.getElementById('app-container').style.display = 'none';
+                    
+                    // Reset forms
+                    const loginForm = document.getElementById('login-form');
+                    const signupForm = document.getElementById('signup-form');
+                    if (loginForm) loginForm.reset();
+                    if (signupForm) signupForm.reset();
+                    
+                    // Clear error messages
+                    const errorMessages = document.querySelectorAll('.error-message');
+                    errorMessages.forEach(el => el.textContent = '');
+                }
+            });
+            
+            // Add event listeners for login/signup forms
+            setupAuthForms();
+            
+            // Show login form by default
+            const loginForm = document.getElementById('login-form');
+            const signupForm = document.getElementById('signup-form');
+            if (loginForm && signupForm) {
+                loginForm.style.display = 'block';
+                signupForm.style.display = 'none';
+            }
+        });
+    </script>
 </body>
 </html>

@@ -987,6 +987,103 @@
             color: #3182ce;
             cursor: pointer;
         }
+        
+        .workout-templates {
+            margin-bottom: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .workout-templates h3 {
+            margin-bottom: 10px;
+            color: var(--gray-800);
+        }
+
+        .template-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
+        }
+
+        .template-btn {
+            padding: 8px 16px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .template-btn:hover {
+            background: var(--primary-light);
+        }
+
+        .add-exercise {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            width: 90%;
+            max-width: 500px;
+            position: relative;
+        }
+
+        .close {
+            position: absolute;
+            right: 20px;
+            top: 15px;
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .modal-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .save-btn, .cancel-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .save-btn {
+            background: var(--success);
+            color: white;
+        }
+
+        .cancel-btn {
+            background: var(--gray-200);
+            color: var(--gray-800);
+        }
     </style>
 </head>
 <body>
@@ -1101,6 +1198,16 @@
         
         <!-- Current Workout Tab -->
         <div id="workout-tab" class="tab-content active">
+            <div class="workout-templates">
+                <h3>Workout Templates</h3>
+                <div class="template-buttons">
+                    <button onclick="loadWorkoutTemplate('pullVariant1')" class="template-btn">Pull Day - Variant 1</button>
+                    <button onclick="loadWorkoutTemplate('pushVariant1')" class="template-btn">Push Day - Variant 1</button>
+                    <button onclick="loadWorkoutTemplate('legsVariant1')" class="template-btn">Legs Day - Variant 1</button>
+                    <button onclick="showCustomTemplateModal()" class="template-btn">+ Custom Template</button>
+                </div>
+            </div>
+
             <div class="add-exercise">
                 <input type="text" id="exerciseName" placeholder="Exercise name (e.g., Pull-ups)">
                 <select id="exerciseType" style="padding: 0.75rem 1rem; border: 1px solid #e5e7eb; border-radius: 6px;">
@@ -1165,16 +1272,72 @@
         </div>
     </div>
 
+    <!-- Custom Template Modal -->
+    <div id="templateModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeTemplateModal()">&times;</span>
+            <h3>Save Current Workout as Template</h3>
+            <input type="text" id="templateName" placeholder="Template Name (e.g., Upper Body)">
+            <div class="modal-buttons">
+                <button onclick="saveCurrentWorkoutAsTemplate()" class="save-btn">Save Template</button>
+                <button onclick="closeTemplateModal()" class="cancel-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <script>
-        // Store exercises and weekly data in memory
+        // Store exercises, templates, and weekly data in memory
         let exercises = [];
-        let weeklyData = {
-            resistance: 0,
-            cardio: 0,
-            mobility: 0,
-            lastUpdated: null
-        };
-        
+        let weeklyData = [];
+        let workoutTemplates = JSON.parse(localStorage.getItem('workoutTemplates') || '[]');
+        let currentWeek = getWeekNumber(new Date());
+        let currentYear = new Date().getFullYear();
+        let selectedWeek = currentWeek;
+        let selectedYear = currentYear;
+
+        // Define default workout templates
+        const defaultTemplates = [
+            {
+                id: 'pullVariant1',
+                name: 'Pull Day - Variant 1',
+                exercises: [
+                    { name: 'Pull-ups', type: 'resistance', targetReps: 8, sets: 4 },
+                    { name: 'Bent-over Rows', type: 'resistance', targetReps: 10, sets: 3 },
+                    { name: 'Face Pulls', type: 'resistance', targetReps: 12, sets: 3 },
+                    { name: 'Bicep Curls', type: 'resistance', targetReps: 12, sets: 3 },
+                    { name: 'Hammer Curls', type: 'resistance', targetReps: 12, sets: 3 }
+                ]
+            },
+            {
+                id: 'pushVariant1',
+                name: 'Push Day - Variant 1',
+                exercises: [
+                    { name: 'Push-ups', type: 'resistance', targetReps: 15, sets: 4 },
+                    { name: 'Dips', type: 'resistance', targetReps: 10, sets: 3 },
+                    { name: 'Shoulder Press', type: 'resistance', targetReps: 10, sets: 3 },
+                    { name: 'Tricep Extensions', type: 'resistance', targetReps: 12, sets: 3 },
+                    { name: 'Lateral Raises', type: 'resistance', targetReps: 15, sets: 3 }
+                ]
+            },
+            {
+                id: 'legsVariant1',
+                name: 'Legs Day - Variant 1',
+                exercises: [
+                    { name: 'Squats', type: 'resistance', targetReps: 10, sets: 4 },
+                    { name: 'Lunges', type: 'resistance', targetReps: 12, sets: 3 },
+                    { name: 'Calf Raises', type: 'resistance', targetReps: 15, sets: 3 },
+                    { name: 'Glute Bridges', type: 'resistance', targetReps: 12, sets: 3 },
+                    { name: 'Leg Curls', type: 'resistance', targetReps: 12, sets: 3 }
+                ]
+            }
+        ];
+
+        // Initialize default templates if none exist
+        if (workoutTemplates.length === 0) {
+            workoutTemplates = [...defaultTemplates];
+            localStorage.setItem('workoutTemplates', JSON.stringify(workoutTemplates));
+        }
+
         // Load data from localStorage if available
         function loadData() {
             // Load exercises
