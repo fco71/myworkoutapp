@@ -1,13 +1,145 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+<!doctype html>
+<html lang="en" class="h-full bg-neutral-50">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>MyWorkoutApp</title>
+    <link rel="icon" href="/favicon.ico" />
+  </head>
+  <body class="h-full">
+    <div id="app" class="max-w-3xl mx-auto p-4 space-y-4">
+      <!-- Header -->
+      <header class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold tracking-tight">MyWorkoutApp</h1>
+        <nav class="flex gap-2" role="tablist" aria-label="Main Tabs">
+          <button class="btn-ghost" data-tab="today" aria-selected="true">Today</button>
+          <button class="btn-ghost" data-tab="routines">Routines</button>
+          <button class="btn-ghost" data-tab="history">History</button>
+          <button class="btn-ghost" data-tab="goals">Goals</button>
+        </nav>
+      </header>
 
-/* Custom styles can be added below */
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+      <!-- Today -->
+      <section id="tab-today" role="tabpanel" class="space-y-4">
+        <!-- Weekly header counters -->
+        <div class="card">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="font-semibold">This Week</h2>
+            <div class="text-xs text-neutral-500" id="week-range"></div>
+          </div>
+          <div id="weekly-header" class="grid grid-cols-4 gap-2">
+            <button data-type="resistance" class="counter chip">R 0/0</button>
+            <button data-type="cardio" class="counter chip">C 0/0</button>
+            <button data-type="mobility" class="counter chip">M 0/0</button>
+            <button data-type="other" class="counter chip">O 0/0</button>
+          </div>
+        </div>
+
+        <!-- Quick add -->
+        <div class="card space-y-3">
+          <h3 class="font-semibold">Quick add</h3>
+          <div class="flex flex-wrap gap-2">
+            <button class="btn" data-quick-activity="Bike" data-type="cardio">Bike 30m</button>
+            <button class="btn" data-quick-activity="Walk" data-type="cardio">Walk 20m</button>
+            <button class="btn" data-quick-activity="Mobility Flow" data-type="mobility">Mobility</button>
+            <button class="btn" data-quick-activity="Other" data-type="other">Other</button>
+          </div>
+        </div>
+
+        <!-- Resistance session -->
+        <div class="card space-y-3">
+          <h3 class="font-semibold">Resistance session</h3>
+          <div class="grid sm:grid-cols-4 gap-2">
+            <label class="flex flex-col">
+              <span>Exercise</span>
+              <input id="ex-name" class="input" placeholder="e.g., Bench Press" />
+            </label>
+            <label class="flex flex-col">
+              <span>Reps</span>
+              <input id="ex-reps" class="input" type="number" min="1" value="10" />
+            </label>
+            <label class="flex flex-col">
+              <span>Weight (kg)</span>
+              <input id="ex-weight" class="input" type="number" min="0" step="0.5" value="30" />
+            </label>
+            <div class="flex items-end">
+              <button id="add-set" class="btn w-full">Add set</button>
+            </div>
+          </div>
+          <div id="sets-list" class="text-sm text-neutral-700"></div>
+        </div>
+      </section>
+
+      <!-- Routines -->
+      <section id="tab-routines" role="tabpanel" hidden class="space-y-4">
+        <div class="card space-y-3">
+          <h3 class="font-semibold">Saved routines</h3>
+          <ul id="routines-list" class="space-y-2"></ul>
+          <details>
+            <summary class="cursor-pointer">Create routine</summary>
+            <div class="mt-2 grid sm:grid-cols-2 gap-2">
+              <input id="routine-name" class="input" placeholder="Routine name" />
+              <button id="save-routine" class="btn">Save routine</button>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- History -->
+      <section id="tab-history" role="tabpanel" hidden class="space-y-4">
+        <div class="card space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold">Recent history</h3>
+            <div class="flex gap-2">
+              <button id="export-json" class="btn">Export</button>
+              <label class="btn-ghost cursor-pointer">
+                Import
+                <input id="import-file" type="file" accept="application/json" hidden />
+              </label>
+            </div>
+          </div>
+          <ul id="history-list" class="space-y-2"></ul>
+        </div>
+      </section>
+
+      <!-- Goals -->
+      <section id="tab-goals" role="tabpanel" hidden class="space-y-4">
+        <div class="card space-y-3">
+          <h3 class="font-semibold">Weekly goals</h3>
+          <div class="grid sm:grid-cols-4 gap-2">
+            <label class="flex flex-col"><span>Resistance</span><input id="g-resistance" class="input" type="number" min="0" value="2" /></label>
+            <label class="flex flex-col"><span>Cardio</span><input id="g-cardio" class="input" type="number" min="0" value="3" /></label>
+            <label class="flex flex-col"><span>Mobility</span><input id="g-mobility" class="input" type="number" min="0" value="2" /></label>
+            <label class="flex flex-col"><span>Other</span><input id="g-other" class="input" type="number" min="0" value="0" /></label>
+          </div>
+          <div class="flex gap-2">
+            <button id="save-goals" class="btn">Save</button>
+            <button id="reset-all" class="btn-ghost">Reset data</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Floating Timer -->
+    <div class="fixed right-4 bottom-4 shadow-xl rounded-2xl p-4 bg-white card w-56">
+      <div class="text-xs text-neutral-500 mb-1">Rest Timer</div>
+      <div id="timer-display" class="text-3xl tabular-nums">00:30</div>
+      <div class="mt-3 grid grid-cols-3 gap-2">
+        <button id="t-30" class="btn-ghost">30s</button>
+        <button id="t-60" class="btn-ghost">60s</button>
+        <button id="t-90" class="btn-ghost">90s</button>
+      </div>
+      <div class="mt-2 grid grid-cols-2 gap-2">
+        <button id="t-start" class="btn">Start</button>
+        <button id="t-stop" class="btn-ghost">Stop</button>
+      </div>
+      <div class="text-xs text-neutral-500 mt-2">Space = start/stop · Esc = stop</div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </body>
+</html>
