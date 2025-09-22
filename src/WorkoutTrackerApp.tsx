@@ -1,4 +1,7 @@
 import React, { useMemo, useState, useEffect } from "react";
+import { auth, db } from "@/lib/firebase";
+import { onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -58,27 +61,8 @@ function cn(...classes: (string | false | undefined)[]) {
   return classes.filter(Boolean).join(" ");
 }
 
-// --- Persistence (localStorage) ---
-const LS_KEY = "workout-tracker-state-v1";
-
-type PersistedState = {
-  weekly: WeeklyPlan;
-  session: ResistanceSession;
-};
-
-function loadState(): PersistedState | null {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function saveState(state: PersistedState) {
-  localStorage.setItem(LS_KEY, JSON.stringify(state));
-}
+// --- Persistence (Firebase Firestore) ---
+type PersistedState = { weekly: WeeklyPlan; session: ResistanceSession };
 
 // --- Seed Defaults ---
 function defaultWeekly(): WeeklyPlan {
@@ -108,20 +92,41 @@ function defaultSession(): ResistanceSession {
 export default function WorkoutTrackerApp() {
   const [weekly, setWeekly] = useState<WeeklyPlan>(defaultWeekly());
   const [session, setSession] = useState<ResistanceSession>(defaultSession());
+  const [userId, setUserId] = useState<string | null>(null);
+  const [booted, setBooted] = useState(false);
 
-  // load on mount
+  // Offline cache is configured at Firestore initialization in lib/firebase
+
+  // Auth + initial load
   useEffect(() => {
-    const s = loadState();
-    if (s) {
-      setWeekly(s.weekly);
-      setSession(s.session);
-    }
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      try {
+        if (u) {
+          setUserId(u.uid);
+          const ref = doc(db, "users", u.uid, "state", "tracker");
+          const snap = await getDoc(ref);
+          if (snap.exists()) {
+            const data = snap.data() as PersistedState;
+            if (data?.weekly) setWeekly(data.weekly);
+            if (data?.session) setSession(data.session);
+          }
+        } else {
+          setUserId(null);
+        }
+      } finally {
+        setBooted(true);
+      }
+    });
+    return () => unsub();
   }, []);
 
-  // autosave
+  // autosave to Firestore
   useEffect(() => {
-    saveState({ weekly, session });
-  }, [weekly, session]);
+    if (!userId) return;
+    const ref = doc(db, "users", userId, "state", "tracker");
+    const payload: PersistedState = { weekly, session };
+    setDoc(ref, payload, { merge: true }).catch(() => {});
+  }, [userId, weekly, session]);
 
   const resetWeek = () => setWeekly(defaultWeekly());
   const resetSession = () => setSession(defaultSession());
@@ -132,8 +137,8 @@ export default function WorkoutTrackerApp() {
         <header className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-semibold tracking-tight">Workout Tracker</h1>
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => saveState({ weekly, session })}>
-              <Save className="mr-2 h-4 w-4" /> Save
+            <Button variant="secondary" disabled={!booted}>
+              <Save className="mr-2 h-4 w-4" /> {userId ? "Saving to cloud" : "Sign in to save"}
             </Button>
           </div>
         </header>

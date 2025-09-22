@@ -28,12 +28,12 @@ function App() {
       minSets: 3,
     };
     
-    setExercises([...exercises, newExercise]);
+    setExercises((prev) => [...prev, newExercise]);
     setNewExerciseName('');
   };
 
   const addSet = (exerciseId: string) => {
-    setExercises(exercises.map(ex => 
+    setExercises((prev) => prev.map(ex => 
       ex.id === exerciseId 
         ? { ...ex, sets: [...ex.sets, 0] } 
         : ex
@@ -41,7 +41,7 @@ function App() {
   };
 
   const updateReps = (exerciseId: string, setIndex: number, value: number) => {
-    setExercises(exercises.map(ex => 
+    setExercises((prev) => prev.map(ex => 
       ex.id === exerciseId 
         ? { 
             ...ex, 
@@ -52,7 +52,7 @@ function App() {
   };
 
   const deleteExercise = (exerciseId: string) => {
-    setExercises(exercises.filter(ex => ex.id !== exerciseId));
+    setExercises((prev) => prev.filter(ex => ex.id !== exerciseId));
   };
 
   const getCellClass = (exercise: Exercise, reps: number, index: number) => {
