@@ -1,0 +1,1589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workout Tracker</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-light: #818cf8;
+            --success: #10b981;
+            --success-light: #6ee7b7;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-400: #9ca3af;
+            --gray-700: #374151;
+            --gray-800: #1f2937;
+            --gray-900: #111827;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --transition: all 0.2s ease-in-out;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', sans-serif;
+            line-height: 1.5;
+            color: var(--gray-800);
+            background-color: #f8fafc;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+        
+        body {
+            background-color: #f9fafb;
+            color: #1f2937;
+            line-height: 1.5;
+            padding: 20px;
+        }
+        
+        .tabs {
+            display: flex;
+            background: white;
+            border-radius: 12px;
+            padding: 6px;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .tab {
+            flex: 1;
+            padding: 12px 16px;
+            text-align: center;
+            cursor: pointer;
+            font-weight: 500;
+            color: var(--gray-500);
+            transition: var(--transition);
+            border-radius: 8px;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .tab.active {
+            color: white;
+            font-weight: 600;
+        }
+        
+        .tab.active::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            z-index: -1;
+            border-radius: 6px;
+            box-shadow: var(--shadow);
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 24px 16px 80px;
+        }
+        
+        h1 {
+            font-size: 2rem;
+            font-weight: 800;
+            color: var(--gray-900);
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+        
+        .exercise-title {
+            font-weight: 600;
+            color: var(--gray-800);
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: inline-block;
+        }
+        
+        .exercise-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.25rem;
+            background: linear-gradient(90deg, var(--primary), var(--primary-light));
+            color: white;
+        }
+        
+        .exercise-title {
+            font-weight: 600;
+            font-size: 1.05rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .set-status {
+            color: var(--success);
+            font-weight: 600;
+            font-size: 0.9em;
+            margin-top: 0.25rem;
+        }
+        
+        .exercise-target {
+            color: var(--gray-700);
+        }
+        
+        .sets {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 0.75rem;
+            padding: 1.25rem;
+        }
+        
+        .set-input {
+            width: 70px;
+            height: 50px;
+            text-align: center;
+            font-size: 1rem;
+            border: 2px solid var(--gray-200);
+            border-radius: 6px;
+            padding: 0.5rem;
+        }
+        
+        .set-input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        
+        .activity-check {
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
+            border: 2px solid var(--gray-300);
+            background: white;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: var(--transition);
+        }
+        
+        .activity-check:hover {
+            border-color: var(--primary);
+        }
+        
+        .add-set {
+            width: 70px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px dashed var(--gray-200);
+            border-radius: 6px;
+            background: none;
+            color: var(--gray-700);
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+        
+        .add-set:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+        
+        .exercise.goal-partial {
+            border-left-color: var(--warning);
+        }
+        
+        .add-exercise {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            margin-bottom: 1.5rem;
+        }
+        
+        .add-exercise h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            color: var(--gray-800);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .add-exercise h2 i {
+            color: var(--primary);
+        }
+        
+        .add-exercise input {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--gray-200);
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+        
+        .add-exercise input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        
+        button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: var(--transition);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            white-space: nowrap;
+        }
+        
+        button:hover {
+            background: #4338ca;
+            transform: translateY(-1px);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        .add-set-btn {
+            background: var(--gray-100);
+            color: var(--gray-700);
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+            margin: 0 1.25rem 1.25rem;
+            border: 1px dashed var(--gray-300);
+            width: auto;
+            display: inline-flex;
+        }
+        
+        .add-set-btn:hover {
+            background: var(--gray-200);
+            border-color: var(--gray-400);
+        }
+        
+        /* Rest Timer Modal */
+        .rest-timer-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .rest-timer-modal.active {
+            display: flex;
+            opacity: 1;
+        }
+        
+        .rest-timer-container {
+            background: white;
+            border-radius: 20px;
+            width: 90%;
+            max-width: 400px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            transform: translateY(20px);
+            transition: transform 0.3s ease;
+        }
+        
+        .rest-timer-modal.active .rest-timer-container {
+            transform: translateY(0);
+        }
+        
+        .rest-timer-header {
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            color: white;
+            padding: 1.5rem;
+            text-align: center;
+            position: relative;
+        }
+        
+        .rest-timer-close {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .rest-timer-close:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .rest-timer-display {
+            font-size: 4rem;
+            font-weight: 700;
+            font-family: 'Roboto Mono', monospace;
+            letter-spacing: -2px;
+            margin: 1rem 0;
+            text-align: center;
+            color: var(--gray-800);
+        }
+        
+        .rest-timer-controls {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .rest-timer-btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 50px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.2s;
+            font-size: 1rem;
+        }
+        
+        .rest-timer-btn.primary {
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            color: white;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+        }
+        
+        .rest-timer-btn.primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(79, 70, 229, 0.4);
+        }
+        
+        .rest-timer-btn.secondary {
+            background: var(--gray-100);
+            color: var(--gray-700);
+        }
+        
+        .rest-timer-btn.secondary:hover {
+            background: var(--gray-200);
+        }
+        
+        .rest-timer-presets {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            padding: 0 1.5rem;
+        }
+        
+        .rest-timer-preset {
+            background: var(--gray-50);
+            border: 1px solid var(--gray-200);
+            border-radius: 20px;
+            padding: 0.5rem 1rem;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .rest-timer-preset:hover {
+            background: var(--gray-100);
+            border-color: var(--gray-300);
+        }
+        
+        .rest-timer-preset.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+        
+        .rest-timer-custom {
+            padding: 0 1.5rem 1.5rem;
+        }
+        
+        .rest-timer-custom label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--gray-600);
+            font-size: 0.9rem;
+        }
+        
+        .rest-timer-custom input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+        
+        .rest-timer-custom input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+        
+        /* Rest Timer Toggle Button */
+        .rest-timer-toggle {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            color: white;
+            border: none;
+            box-shadow: 0 10px 25px rgba(79, 70, 229, 0.3);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .rest-timer-toggle:hover {
+            transform: translateY(-3px) scale(1.05);
+            box-shadow: 0 15px 30px rgba(79, 70, 229, 0.4);
+        }
+        
+        .rest-timer-toggle:active {
+            transform: translateY(0) scale(0.98);
+        }
+        
+        .rest-timer-toggle i {
+            font-size: 1.5rem;
+            transition: transform 0.3s ease;
+        }
+        
+        .rest-timer-toggle.active {
+            background: linear-gradient(135deg, #ef4444, #f87171);
+            box-shadow: 0 10px 25px rgba(239, 68, 68, 0.3);
+        }
+        
+        .rest-timer-toggle.active:hover {
+            box-shadow: 0 15px 30px rgba(239, 68, 68, 0.4);
+        }
+        
+        /* Animation for timer */
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        
+        .rest-timer-pulse {
+            animation: pulse 1s infinite;
+        }
+        
+        .set {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.25rem;
+            background: var(--gray-50);
+            padding: 0.75rem 0.5rem;
+            border-radius: 8px;
+            border: 1px solid var(--gray-200);
+            transition: var(--transition);
+        }
+        
+        .set:hover {
+            border-color: var(--primary-light);
+            box-shadow: 0 0 0 1px var(--primary-light);
+        }
+        
+        .set.completed {
+            background: var(--success-light);
+            border-color: var(--success);
+        }
+        
+        .exercise {
+            background: white;
+            border-radius: 12px;
+            padding: 0;
+            margin-bottom: 1rem;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            transition: var(--transition);
+        }
+        
+        .exercise:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .workout-history {
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--gray-200);
+        }
+        
+        .workout-history h3 {
+            font-size: 1.25rem;
+            color: var(--gray-800);
+            margin-bottom: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .workout-history h3::before {
+            content: '';
+            display: block;
+            width: 6px;
+            height: 1.5rem;
+            background: linear-gradient(to bottom, var(--primary), var(--primary-light));
+            border-radius: 3px;
+        }
+        
+        .workout-day {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.25rem;
+            box-shadow: var(--shadow);
+            transition: var(--transition);
+        }
+        
+        .workout-day:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .workout-day-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--gray-100);
+        }
+        
+        .workout-day-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            color: var(--gray-800);
+        }
+        
+        .workout-day-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .delete-workout {
+            color: var(--danger);
+            cursor: pointer;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            transition: var(--transition);
+        }
+        
+        .delete-workout:hover {
+            background: #fee2e2;
+        }
+        
+        .edit-workout {
+            color: #3182ce;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Workout Tracker</h1>
+        <div class="tabs">
+            <div class="tab active" onclick="showTab('workout')">Current Workout</div>
+            <div class="tab" onclick="showTab('weekly')">Weekly Goals</div>
+            <div class="tab" onclick="showTab('history')">Workout History</div>
+        </div>
+        
+        <!-- Rest Timer Toggle Button -->
+        <button class="rest-timer-toggle" id="restTimerToggle">
+            <i class="fas fa-clock"></i>
+        </button>
+        
+        <!-- Rest Timer Modal -->
+        <div class="rest-timer-modal" id="restTimerModal">
+            <div class="rest-timer-container">
+                <div class="rest-timer-header">
+                    <button class="rest-timer-close" id="restTimerClose">
+                        <i class="fas fa-times"></i>
+                    </button>
+                    <h3>Rest Timer</h3>
+                </div>
+                <div class="rest-timer-content" style="padding: 1.5rem;">
+                    <div class="rest-timer-display" id="restTimerDisplay">1:30</div>
+                    
+                    <div class="rest-timer-presets">
+                        <div class="rest-timer-preset" data-seconds="30">30s</div>
+                        <div class="rest-timer-preset active" data-seconds="90">1:30</div>
+                        <div class="rest-timer-preset" data-seconds="120">2:00</div>
+                        <div class="rest-timer-preset" data-seconds="180">3:00</div>
+                    </div>
+                    
+                    <div class="rest-timer-custom">
+                        <label for="customRestTime">Custom Time (seconds)</label>
+                        <input type="number" id="customRestTime" min="5" max="600" value="90">
+                    </div>
+                    
+                    <div class="rest-timer-controls">
+                        <button class="rest-timer-btn primary" id="restTimerStart">
+                            <i class="fas fa-play"></i> Start
+                        </button>
+                        <button class="rest-timer-btn secondary" id="restTimerStop" disabled>
+                            <i class="fas fa-stop"></i> Stop
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Current Workout Tab -->
+        <div id="workout-tab" class="tab-content active">
+            <div class="add-exercise">
+                <input type="text" id="exerciseName" placeholder="Exercise name (e.g., Pull-ups)">
+                <select id="exerciseType" style="padding: 0.75rem 1rem; border: 1px solid #e5e7eb; border-radius: 6px;">
+                    <option value="resistance">Resistance</option>
+                    <option value="cardio">Cardio</option>
+                    <option value="mobility">Mobility</option>
+                    <option value="bike">Biking</option>
+                    <option value="other">Other Activity</option>
+                </select>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <label style="display: flex; align-items: center; gap: 5px;">
+                        <input type="checkbox" id="isTrackedWorkout" checked>
+                        Track Workout (sets/reps)
+                    </label>
+                </div>
+                <input type="number" id="targetReps" placeholder="Target reps" min="1" value="6">
+                <button onclick="addExercise()">Add Exercise</button>
+            </div>
+            
+            <div id="exercisesContainer"></div>
+            
+            <div class="workout-history" id="workoutHistory">
+                <h3>Previous Workouts</h3>
+                <div id="previousWorkouts"></div>
+            </div>
+        </div>
+        
+        <!-- Weekly Goals Tab -->
+        <div id="weekly-tab" class="tab-content">
+            <h2>Weekly Goals</h2>
+            <div class="exercise" style="margin-bottom: 2rem;">
+                <div class="exercise-header">
+                    <div class="exercise-title">Weekly Exercise Targets</div>
+                </div>
+                <div style="padding: 1rem 0;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 1rem;">
+                        <div>Resistance Training:</div>
+                        <div><span id="resistance-count">0</span> / <span id="resistance-goal">3</span> days</div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 1rem;">
+                        <div>Cardio (e.g., Biking):</div>
+                        <div><span id="cardio-count">0</span> / <span id="cardio-goal">3</span> days</div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 1rem;">
+                        <div>Mobility:</div>
+                        <div><span id="mobility-count">0</span> / <span id="mobility-goal">2</span> days</div>
+                    </div>
+                </div>
+            </div>
+            <h3>This Week's Summary</h3>
+            <div id="weeklySummary"></div>
+        </div>
+        
+        <!-- Workout History Tab -->
+        <div id="history-tab" class="tab-content">
+            <h2>Workout History</h2>
+            <div style="margin-bottom: 1rem;">
+                <label>Select Week: </label>
+                <input type="week" id="weekSelector" onchange="loadWeekData()">
+            </div>
+            <div id="historyContent"></div>
+        </div>
+    </div>
+
+    <script>
+        // Store exercises and weekly data in memory
+        let exercises = [];
+        let weeklyData = {
+            resistance: 0,
+            cardio: 0,
+            mobility: 0,
+            lastUpdated: null
+        };
+        
+        // Load data from localStorage if available
+        function loadData() {
+            // Load exercises
+            const savedExercises = localStorage.getItem('workoutExercises');
+            if (savedExercises) {
+                exercises = JSON.parse(savedExercises);
+            }
+            
+            // Load weekly data
+            const savedWeeklyData = localStorage.getItem('weeklyData');
+            if (savedWeeklyData) {
+                weeklyData = JSON.parse(savedWeeklyData);
+                // Check if we need to reset weekly counts (new week)
+                const now = new Date();
+                const lastUpdated = weeklyData.lastUpdated ? new Date(weeklyData.lastUpdated) : null;
+                
+                if (!lastUpdated || getWeekNumber(now) !== getWeekNumber(lastUpdated)) {
+                    // Save current week's data to history before resetting
+                    saveWeekToHistory();
+                    
+                    // Reset counts for new week
+                    weeklyData = {
+                        resistance: 0,
+                        cardio: 0,
+                        mobility: 0,
+                        lastUpdated: now.toISOString()
+                    };
+                    saveWeeklyData();
+                }
+            } else {
+                weeklyData.lastUpdated = new Date().toISOString();
+                saveWeeklyData();
+            }
+            
+            renderExercises();
+            updateWeeklySummary();
+            setupWeekSelector();
+        }
+        
+        // Save exercises to localStorage
+        function saveExercise(id, name, type, targetReps, sets, completedSets, isTracked = true, completed = false) {
+            const exercise = {
+                id,
+                name,
+                type,
+                targetReps,
+                sets,
+                completedSets,
+                isTracked,
+                completed
+            };
+            
+            const existingExercises = JSON.parse(localStorage.getItem('workoutExercises') || '[]');
+            const index = existingExercises.findIndex(ex => ex.id === id);
+            
+            if (index >= 0) {
+                existingExercises[index] = exercise;
+            } else {
+                existingExercises.push(exercise);
+            }
+            
+            localStorage.setItem('workoutExercises', JSON.stringify(existingExercises));
+        }
+        
+        // Save weekly data to localStorage
+        function saveWeeklyData() {
+            localStorage.setItem('weeklyData', JSON.stringify(weeklyData));
+        }
+        
+        // Save current week's data to history
+        function saveWeekToHistory() {
+            const weekHistory = JSON.parse(localStorage.getItem('weekHistory') || '[]');
+            const weekNumber = getWeekNumber(new Date());
+            const year = new Date().getFullYear();
+            const weekKey = `${year}-W${weekNumber.toString().padStart(2, '0')}`;
+            
+            // Check if we already have data for this week
+            const existingWeekIndex = weekHistory.findIndex(w => w.weekKey === weekKey);
+            
+            const weekData = {
+                weekKey,
+                resistance: weeklyData.resistance,
+                cardio: weeklyData.cardio,
+                mobility: weeklyData.mobility,
+                completed: getCompletionStatus()
+            };
+            
+            if (existingWeekIndex >= 0) {
+                weekHistory[existingWeekIndex] = weekData;
+            } else {
+                weekHistory.push(weekData);
+            }
+            
+            localStorage.setItem('weekHistory', JSON.stringify(weekHistory));
+        }
+        
+        // Get completion status for the current week
+        function getCompletionStatus() {
+            const resistanceGoal = 3; // days
+            const cardioGoal = 3;     // days
+            const mobilityGoal = 2;   // days
+            
+            return {
+                resistance: weeklyData.resistance >= resistanceGoal,
+                cardio: weeklyData.cardio >= cardioGoal,
+                mobility: weeklyData.mobility >= mobilityGoal
+            };
+        }
+        
+        // Get ISO week number
+        function getWeekNumber(date) {
+            const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            const dayNum = d.getUTCDay() || 7;
+            d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+            const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+            return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+        }
+        
+        // Setup week selector with available weeks
+        function setupWeekSelector() {
+            const weekHistory = JSON.parse(localStorage.getItem('weekHistory') || '[]');
+            const selector = document.getElementById('weekSelector');
+            
+            // Add current week
+            const today = new Date();
+            const currentWeek = getMonday(today);
+            selector.value = getWeekInputValue(currentWeek);
+            
+            // Add historical weeks
+            weekHistory.forEach(week => {
+                const option = document.createElement('option');
+                option.value = week.weekKey;
+                option.textContent = `Week ${week.weekKey.split('-W')[1]}, ${week.weekKey.split('-')[0]}`;
+                selector.add(option);
+            });
+        }
+        
+        // Get Monday of the current week
+        function getMonday(d) {
+            d = new Date(d);
+            const day = d.getDay();
+            const diff = d.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is Sunday
+            return new Date(d.setDate(diff));
+        }
+        
+        // Format date as YYYY-Www
+        function getWeekInputValue(date) {
+            const d = new Date(date);
+            d.setHours(0, 0, 0, 0);
+            d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+            const week1 = new Date(d.getFullYear(), 0, 4);
+            const weekNum = 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+            return d.getFullYear() + '-W' + weekNum.toString().padStart(2, '0');
+        }
+        
+        // Show selected tab
+        function showTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Deactivate all tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            document.getElementById(`${tabName}-tab`).classList.add('active');
+            
+            // Activate selected tab
+            event.currentTarget.classList.add('active');
+            
+            // Update data if needed
+            if (tabName === 'weekly') {
+                updateWeeklySummary();
+            } else if (tabName === 'history') {
+                loadWeekData();
+            }
+        }
+        
+        // Add a new exercise
+        function addExercise() {
+            const name = document.getElementById('exerciseName').value.trim();
+            const type = document.getElementById('exerciseType').value;
+            const isTracked = document.getElementById('isTrackedWorkout').checked;
+            const targetReps = isTracked ? 10 : 1; // Default to 1 for logged activities
+            
+            if (!name) {
+                alert('Please enter an exercise name');
+                return;
+            }
+            
+            const exercise = {
+                id: Date.now().toString(),
+                name,
+                type,
+                targetReps,
+                sets: isTracked ? [] : [1], // Single set for logged activities
+                completedSets: 0,
+                isTracked: isTracked,
+                completed: !isTracked // Mark as completed if it's a logged activity
+            };
+            
+            saveExercise(
+                exercise.id, 
+                exercise.name, 
+                exercise.type, 
+                exercise.targetReps, 
+                exercise.sets, 
+                exercise.completedSets,
+                exercise.isTracked,
+                exercise.completed
+            );
+            
+            renderExercises();
+            
+            // Clear input but keep the type and tracking preference
+            document.getElementById('exerciseName').value = '';
+        }
+        
+        // Update rep count for a set
+        function toggleActivityCompletion(activityId) {
+            const exercises = JSON.parse(localStorage.getItem('workoutExercises') || '[]');
+            const exerciseIndex = exercises.findIndex(ex => ex.id === activityId);
+            
+            if (exerciseIndex !== -1) {
+                exercises[exerciseIndex].completed = !exercises[exerciseIndex].completed;
+                
+                // If marking as complete, ensure there's a set to mark progress
+                if (exercises[exerciseIndex].completed && exercises[exerciseIndex].sets.length === 0) {
+                    exercises[exerciseIndex].sets = [1];
+                }
+                
+                localStorage.setItem('workoutExercises', JSON.stringify(exercises));
+                renderExercises();
+                
+                // Update weekly counts if it's a completed activity
+                if (exercises[exerciseIndex].completed) {
+                    updateWeeklyCounts(exercises[exerciseIndex].type);
+                }
+            }
+        }
+        
+        // Delete an exercise
+        function deleteExercise(exerciseId) {
+            if (confirm('Are you sure you want to delete this exercise?')) {
+                const exercises = JSON.parse(localStorage.getItem('workoutExercises') || '[]');
+                const updatedExercises = exercises.filter(ex => ex.id !== exerciseId);
+                localStorage.setItem('workoutExercises', JSON.stringify(updatedExercises));
+                renderExercises();
+            }
+        }
+        
+        // Render all exercises
+        function renderExercises() {
+            const container = document.getElementById('exercisesContainer');
+            const exercises = JSON.parse(localStorage.getItem('workoutExercises') || '[]');
+            
+            // Separate exercises into tracked and logged
+            const trackedExercises = exercises.filter(ex => ex.isTracked !== false);
+            const loggedActivities = exercises.filter(ex => ex.isTracked === false);
+            
+            container.innerHTML = '';
+            
+            // Render tracked exercises first
+            if (trackedExercises.length > 0) {
+                const trackedHeader = document.createElement('h3');
+                trackedHeader.textContent = 'Tracked Workouts';
+                trackedHeader.style.margin = '20px 0 10px 0';
+                trackedHeader.style.color = '#4a5568';
+                container.appendChild(trackedHeader);
+                
+                trackedExercises.forEach(exercise => {
+                    container.appendChild(createExerciseElement(exercise));
+                });
+            }
+            
+            // Then render logged activities
+            if (loggedActivities.length > 0) {
+                const loggedHeader = document.createElement('h3');
+                loggedHeader.textContent = 'Logged Activities';
+                loggedHeader.style.margin = '30px 0 10px 0';
+                loggedHeader.style.color = '#4a5568';
+                container.appendChild(loggedHeader);
+                
+                loggedActivities.forEach(activity => {
+                    container.appendChild(createExerciseElement(activity));
+                });
+            }
+        }
+        
+        function createExerciseElement(exercise) {
+            const exerciseEl = document.createElement('div');
+            exerciseEl.className = 'exercise';
+            exerciseEl.dataset.id = exercise.id;
+            
+            let content = '';
+            
+            if (exercise.isTracked !== false) {
+                // Tracked workout with sets/reps
+                content = `
+                    <div class="sets">
+                        ${exercise.sets.map((set, index) => `
+                            <div class="set">
+                                <span>Set ${index + 1}:</span>
+                                <input type="number" 
+                                       value="${set}" 
+                                       min="0" 
+                                       onchange="updateSet('${exercise.id}', ${index}, this.value)">
+                                <span class="target">/ ${exercise.targetReps}</span>
+                                <span class="set-status">
+                                    ${set >= exercise.targetReps ? '✓' : ''}
+                                </span>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <button onclick="addSet('${exercise.id}')" class="add-set-btn">+ Add Set</button>
+                `;
+            } else {
+                // Logged activity with just completion
+                const icon = exercise.type === 'bike' ? 'bicycle' : 'check';
+                content = `
+                    <div class="activity-log" style="display: flex; align-items: center; gap: 10px; padding: 10px 0;">
+                        <button onclick="toggleActivityCompletion('${exercise.id}')" 
+                                class="activity-check" 
+                                style="width: 24px; height: 24px; border-radius: 4px; border: 2px solid #4a5568; 
+                                       background: ${exercise.completed ? '#38a169' : 'white'}; 
+                                       color: white; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+                            ${exercise.completed ? '✓' : ''}
+                        </button>
+                        <div>
+                            <i class="fas fa-${icon}" style="margin-right: 5px; color: #4a5568;"></i>
+                            ${exercise.name}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            exerciseEl.innerHTML = `
+                <div class="exercise-header">
+                    <div class="exercise-title">
+                        ${exercise.name} 
+                        <span class="exercise-type ${exercise.type}">
+                            ${exercise.type === 'bike' ? '<i class="fas fa-bicycle"></i> ' : ''}
+                            ${exercise.type}
+                        </span>
+                    </div>
+                    <div class="exercise-actions">
+                        <button onclick="deleteExercise('${exercise.id}')" class="delete-btn">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                ${content}
+            `;
+            
+            return exerciseEl;
+                
+                // Add "add set" button
+                const addSetBtn = document.createElement('button');
+                addSetBtn.className = 'add-set';
+                addSetBtn.textContent = '+';
+                addSetBtn.onclick = () => addSet(exercise.id);
+                setsContainer.appendChild(addSetBtn);
+            });
+        }
+        
+        // Update weekly exercise counts
+        function updateWeeklyCounts() {
+            // Reset counts
+            weeklyData.resistance = 0;
+            weeklyData.cardio = 0;
+            weeklyData.mobility = 0;
+            
+            // Track unique exercise days by type
+            const exerciseDays = {
+                resistance: new Set(),
+                cardio: new Set(),
+                mobility: new Set()
+            };
+            
+            // Count exercises by type and day
+            exercises.forEach(exercise => {
+                if (exercise.type in exerciseDays) {
+                    const date = new Date(exercise.date).toDateString();
+                    exerciseDays[exercise.type].add(date);
+                }
+            });
+            
+            // Update counts
+            weeklyData.resistance = exerciseDays.resistance.size;
+            weeklyData.cardio = exerciseDays.cardio.size;
+            weeklyData.mobility = exerciseDays.mobility.size;
+            weeklyData.lastUpdated = new Date().toISOString();
+            
+            saveWeeklyData();
+            updateWeeklySummary();
+        }
+        
+        // Update the weekly summary display
+        function updateWeeklySummary() {
+            document.getElementById('resistance-count').textContent = weeklyData.resistance;
+            document.getElementById('cardio-count').textContent = weeklyData.cardio;
+            document.getElementById('mobility-count').textContent = weeklyData.mobility;
+            
+            // Update progress indicators
+            updateProgressBar('resistance', weeklyData.resistance, 3);
+            updateProgressBar('cardio', weeklyData.cardio, 3);
+            updateProgressBar('mobility', weeklyData.mobility, 2);
+            
+            // Update weekly summary
+            const summaryEl = document.getElementById('weeklySummary');
+            const today = new Date();
+            const weekStart = getMonday(today);
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekStart.getDate() + 6);
+            
+            const formatDate = (date) => {
+                return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            };
+            
+            summaryEl.innerHTML = `
+                <p>Week of ${formatDate(weekStart)} to ${formatDate(weekEnd)}</p>
+                <div style="margin-top: 1rem; background: #f3f4f6; border-radius: 6px; padding: 1rem;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                        <span>Resistance Training:</span>
+                        <span>${weeklyData.resistance} / 3 days</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                        <span>Cardio:</span>
+                        <span>${weeklyData.cardio} / 3 days</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>Mobility:</span>
+                        <span>${weeklyData.mobility} / 2 days</span>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Update progress bar for a category
+        function updateProgressBar(category, current, target) {
+            const percent = Math.min(100, (current / target) * 100);
+            const color = percent >= 100 ? 'var(--success)' : 
+                         percent >= 50 ? 'var(--warning)' : 'var(--danger)';
+            
+            // Create or update progress bar
+            let progressBar = document.getElementById(`${category}-progress`);
+            if (!progressBar) {
+                const container = document.createElement('div');
+                container.style.marginTop = '0.5rem';
+                container.style.height = '8px';
+                container.style.backgroundColor = '#e5e7eb';
+                container.style.borderRadius = '4px';
+                container.style.overflow = 'hidden';
+                
+                progressBar = document.createElement('div');
+                progressBar.id = `${category}-progress`;
+                progressBar.style.height = '100%';
+                progressBar.style.width = '0%';
+                progressBar.style.transition = 'width 0.3s ease';
+                progressBar.style.backgroundColor = color;
+                
+                container.appendChild(progressBar);
+                
+                // Find the right place to insert the progress bar
+                const countElement = document.getElementById(`${category}-count`);
+                const parent = countElement.parentNode;
+                parent.parentNode.insertBefore(container, parent.nextSibling);
+            }
+            
+            // Animate progress
+            setTimeout(() => {
+                progressBar.style.width = `${percent}%`;
+                progressBar.style.backgroundColor = color;
+            }, 10);
+        }
+        
+        // Load data for a specific week
+        function loadWeekData() {
+            const weekKey = document.getElementById('weekSelector').value;
+            const historyContent = document.getElementById('historyContent');
+            const weekHistory = JSON.parse(localStorage.getItem('weekHistory') || '[]');
+            
+            const weekData = weekHistory.find(w => w.weekKey === weekKey);
+            
+            if (weekData) {
+                const [year, week] = weekKey.split('-W').map(Number);
+                const weekStart = getDateFromWeek(week, year);
+                const weekEnd = new Date(weekStart);
+                weekEnd.setDate(weekStart.getDate() + 6);
+                
+                const formatDate = (date) => {
+                    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                };
+                
+                let html = `
+                    <div class="exercise" style="margin-bottom: 2rem;">
+                        <div class="exercise-header">
+                            <div class="exercise-title">Week ${weekKey.split('-W')[1]}, ${year}</div>
+                        </div>
+                        <div style="padding: 1rem 0;">
+                            <p style="margin-bottom: 1rem;">${formatDate(weekStart)} - ${formatDate(weekEnd)}</p>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 1rem;">
+                                <div>Resistance Training: 
+                                    <span class="${weekData.completed.resistance ? 'text-green-600' : 'text-red-600'}">
+                                        ${weekData.resistance} / 3 days
+                                        ${weekData.completed.resistance ? '✓' : '✗'}
+                                    </span>
+                                </div>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 1rem;">
+                                <div>Cardio: 
+                                    <span class="${weekData.completed.cardio ? 'text-green-600' : 'text-red-600'}">
+                                        ${weekData.cardio} / 3 days
+                                        ${weekData.completed.cardio ? '✓' : '✗'}
+                                    </span>
+                                </div>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 1rem;">
+                                <div>Mobility: 
+                                    <span class="${weekData.completed.mobility ? 'text-green-600' : 'text-red-600'}">
+                                        ${weekData.mobility} / 2 days
+                                        ${weekData.completed.mobility ? '✓' : '✗'}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                historyContent.innerHTML = html;
+            } else {
+                historyContent.innerHTML = '<p>No data available for this week.</p>';
+            }
+        }
+        
+        // Get date from week number and year
+        function getDateFromWeek(week, year) {
+            const date = new Date(year, 0, 1 + (week - 1) * 7);
+            const dayOfWeek = date.getDay();
+            const monday = new Date(date);
+            monday.setDate(date.getDate() - (dayOfWeek || 7) + 1);
+            return monday;
+        }
+        
+        // Rest Timer
+        let timerInterval;
+        let secondsRemaining = 90; // 1:30 default
+        let timerRunning = false;
+        const timerEndSound = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-alarm-digital-clock-beep-989.mp3');
+        timerEndSound.volume = 0.5;
+        
+        // Initialize the app
+        document.addEventListener('DOMContentLoaded', function() {
+            // Load data
+            loadData();
+            
+            // Initialize UI
+            renderExercises();
+            updateWeeklyCounts();
+            updateWeeklySummary();
+            setupWeekSelector();
+            
+            // Setup rest timer
+            setupRestTimer();
+            
+            // Set current date
+            const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            document.getElementById('currentDate').textContent = new Date().toLocaleDateString('en-US', dateOptions);
+            
+            // Add exercise on Enter key
+            document.getElementById('exerciseName').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    addExercise();
+                }
+            });
+            
+            document.getElementById('targetReps').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    addExercise();
+                }
+            });
+            
+            // Show workout tab by default
+            showTab('workout');
+            
+            // Show a specific tab
+            function showTab(tabName) {
+                // Hide all tab content
+                document.querySelectorAll('.tab-content').forEach(tab => {
+                    tab.style.display = 'none';
+                });
+                
+                // Remove active class from all tabs
+                document.querySelectorAll('.tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+                
+                // Show the selected tab content
+                document.getElementById(tabName + '-tab').style.display = 'block';
+                
+                // Add active class to the clicked tab
+                document.querySelector(`.tab[onclick*="${tabName}"]`).classList.add('active');
+            }
+            
+            // Rest Timer Functions
+            function setupRestTimer() {
+                const modal = document.getElementById('restTimerModal');
+                const toggleBtn = document.getElementById('restTimerToggle');
+                const closeBtn = document.getElementById('restTimerClose');
+                const startBtn = document.getElementById('restTimerStart');
+                const stopBtn = document.getElementById('restTimerStop');
+                const presetBtns = document.querySelectorAll('.rest-timer-preset');
+                const customTimeInput = document.getElementById('customRestTime');
+                
+                // Toggle modal
+                toggleBtn.addEventListener('click', () => {
+                    modal.classList.add('active');
+                });
+                
+                // Close modal
+                closeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    closeRestTimerModal();
+                });
+                
+                // Close modal when clicking outside
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) {
+                        closeRestTimerModal();
+                    }
+                });
+                
+                // Preset buttons
+                presetBtns.forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        presetBtns.forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        const seconds = parseInt(btn.dataset.seconds);
+                        setRestTime(seconds);
+                        customTimeInput.value = seconds;
+                    });
+                });
+                
+                // Custom time input
+                customTimeInput.addEventListener('change', (e) => {
+                    const seconds = Math.min(600, Math.max(5, parseInt(e.target.value) || 5));
+                    e.target.value = seconds;
+                    setRestTime(seconds);
+                    
+                    // Update active preset if it matches
+                    let matchedPreset = false;
+                    presetBtns.forEach(btn => {
+                        if (parseInt(btn.dataset.seconds) === seconds) {
+                            btn.classList.add('active');
+                            matchedPreset = true;
+                        } else {
+                            btn.classList.remove('active');
+                        }
+                    });
+                    
+                    if (!matchedPreset) {
+                        presetBtns.forEach(btn => btn.classList.remove('active'));
+                    }
+                });
+                
+                // Start button
+                startBtn.addEventListener('click', () => {
+                    if (timerRunning) return;
+                    startRestTimer();
+                });
+                
+                // Stop button
+                stopBtn.addEventListener('click', () => {
+                    if (timerRunning) {
+                        stopRestTimer();
+                    } else {
+                        // If timer is not running, reset to last set time
+                        setRestTime(secondsRemaining);
+                    }
+                });
+                
+                // Keyboard shortcuts
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === ' ' || e.key === 'Spacebar') {
+                        e.preventDefault();
+                        if (timerRunning) {
+                            stopRestTimer();
+                        } else {
+                            startRestTimer();
+                        }
+                    } else if (e.key === 'Escape') {
+                        closeRestTimerModal();
+                    }
+                });
+            }
+            
+            function setRestTime(seconds) {
+                secondsRemaining = seconds;
+                updateRestTimerDisplay();
+            }
+            
+            function startRestTimer() {
+                if (timerRunning) return;
+                
+                const startBtn = document.getElementById('restTimerStart');
+                const stopBtn = document.getElementById('restTimerStop');
+                const toggleBtn = document.getElementById('restTimerToggle');
+                
+                timerRunning = true;
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                toggleBtn.classList.add('active');
+                
+                // Update toggle button text
+                updateRestTimerDisplay();
+                
+                // Start the countdown
+                timerInterval = setInterval(() => {
+                    secondsRemaining--;
+                    updateRestTimerDisplay();
+                    
+                    if (secondsRemaining <= 0) {
+                        // Timer finished
+                        timerFinished();
+                    }
+                }, 1000);
+            }
+            
+            function stopRestTimer() {
+                if (!timerRunning) return;
+                
+                clearInterval(timerInterval);
+                timerRunning = false;
+                
+                const startBtn = document.getElementById('restTimerStart');
+                const stopBtn = document.getElementById('restTimerStop');
+                const toggleBtn = document.getElementById('restTimerToggle');
+                
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                toggleBtn.classList.remove('active');
+                toggleBtn.classList.remove('rest-timer-pulse');
+                
+                // Reset the toggle button text
+                updateRestTimerDisplay();
+                
+                // Stop any playing sound
+                timerEndSound.pause();
+                timerEndSound.currentTime = 0;
+            }
+            
+            function timerFinished() {
+                clearInterval(timerInterval);
+                timerRunning = false;
+                
+                const toggleBtn = document.getElementById('restTimerToggle');
+                toggleBtn.classList.add('rest-timer-pulse');
+                
+                // Play sound
+                timerEndSound.play().catch(e => console.log('Audio playback failed:', e));
+                
+                // Show notification if browser supports it
+                if ('Notification' in window && Notification.permission === 'granted') {
+                    new Notification('Rest Time Complete!', {
+                        body: 'Your rest period has ended.',
+                        icon: 'https://cdn.jsdelivr.net/npm/emoji-datasource-apple@7.0.2/img/apple/64/23f1-fe0f.png'
+                    });
+                }
+                
+                // Auto-close after 10 seconds if not stopped
+                setTimeout(() => {
+                    if (!timerRunning) { // If not restarted
+                        toggleBtn.classList.remove('rest-timer-pulse');
+                    }
+                }, 10000);
+            }
+            
+            function updateRestTimerDisplay() {
+                const minutes = Math.floor(secondsRemaining / 60);
+                const seconds = secondsRemaining % 60;
+                const display = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+                
+                // Update modal display
+                document.getElementById('restTimerDisplay').textContent = display;
+                
+                // Update toggle button
+                const toggleBtn = document.getElementById('restTimerToggle');
+                if (timerRunning) {
+                    toggleBtn.innerHTML = `<span>${display}</span>`;
+                } else {
+                    toggleBtn.innerHTML = '<i class="fas fa-clock"></i>';
+                }
+            }
+            
+            function closeRestTimerModal() {
+                const modal = document.getElementById('restTimerModal');
+                modal.classList.remove('active');
+                
+                // If timer is running, update the toggle button
+                if (timerRunning) {
+                    updateRestTimerDisplay();
+                }
+            }
+            
+            // Request notification permission
+            if ('Notification' in window) {
+                if (Notification.permission !== 'denied') {
+                    Notification.requestPermission();
+                }
+            }    
+            
+            // Set default time to 1:30 and update display
+            setRestTime(90);
+            updateRestTimerDisplay();
+        });
+    </script>
+</body>
+</html>
