@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -93,6 +93,11 @@ export default function WorkoutTrackerApp() {
   const [weekly, setWeekly] = useState<WeeklyPlan>(defaultWeekly());
   const [session, setSession] = useState<ResistanceSession>(defaultSession());
   const [userId, setUserId] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [showSignIn, setShowSignIn] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [booted, setBooted] = useState(false);
 
   // Offline cache is configured at Firestore initialization in lib/firebase
@@ -103,6 +108,7 @@ export default function WorkoutTrackerApp() {
       try {
         if (u) {
           setUserId(u.uid);
+          setUserName(u.displayName || u.email || null);
           const ref = doc(db, "users", u.uid, "state", "tracker");
           const snap = await getDoc(ref);
           if (snap.exists()) {
@@ -112,6 +118,7 @@ export default function WorkoutTrackerApp() {
           }
         } else {
           setUserId(null);
+          setUserName(null);
         }
       } finally {
         setBooted(true);
@@ -137,9 +144,18 @@ export default function WorkoutTrackerApp() {
         <header className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-semibold tracking-tight">Workout Tracker</h1>
           <div className="flex gap-2">
-            <Button variant="secondary" disabled={!booted}>
-              <Save className="mr-2 h-4 w-4" /> {userId ? "Saving to cloud" : "Sign in to save"}
-            </Button>
+            {userId ? (
+              <>
+                <span className="text-sm text-neutral-600 hidden sm:inline">{userName || "Signed in"}</span>
+                <Button variant="secondary" onClick={() => signOut(auth)}>
+                  Sign out
+                </Button>
+              </>
+            ) : (
+              <Button variant="secondary" onClick={() => setShowSignIn(true)}>
+                Sign in
+              </Button>
+            )}
           </div>
         </header>
 
@@ -158,6 +174,62 @@ export default function WorkoutTrackerApp() {
           </TabsContent>
         </Tabs>
       </div>
+      {showSignIn && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-sm">
+            <CardHeader>
+              <CardTitle>{isSignUp ? "Sign up" : "Sign in"}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Input
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <Input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <div className="flex gap-2">
+                <Button
+                  className="flex-1"
+                  onClick={async () => {
+                    try {
+                      if (isSignUp) {
+                        await createUserWithEmailAndPassword(auth, email, password);
+                      } else {
+                        await signInWithEmailAndPassword(auth, email, password);
+                      }
+                      setShowSignIn(false);
+                      setEmail("");
+                      setPassword("");
+                      setIsSignUp(false);
+                    } catch (e) {
+                      console.error("Auth failed:", e);
+                    }
+                  }}
+                >
+                  {isSignUp ? "Sign up" : "Sign in"}
+                </Button>
+                <Button variant="outline" onClick={() => setShowSignIn(false)}>
+                  Cancel
+                </Button>
+              </div>
+              <div className="text-center">
+                <button
+                  className="text-sm text-blue-600 hover:underline"
+                  onClick={() => setIsSignUp(!isSignUp)}
+                >
+                  {isSignUp ? "Already have an account? Sign in" : "Need an account? Sign up"}
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
