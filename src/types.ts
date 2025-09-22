@@ -1,4 +1,4 @@
-export type WorkoutType = "resistance" | "cardio" | "mobility" | "other";
+export type WorkoutType = string; // flexible, user-defined types like 'Bike', 'Calves', 'Resistance', 'Cardio'
 
 export interface Exercise {
   id: string;

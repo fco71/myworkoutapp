@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { doc, getDoc, setDoc, collection, addDoc, getDocs } from "firebase/firestore";
@@ -9,19 +9,19 @@ import { Input } from "@/components/ui/input";
 import { Plus, Trash2, Check, RefreshCw, Save } from "lucide-react";
 
 // --- Types ---
-type WorkoutType = "Bike" | "Calves" | "Resistance" | "Cardio" | "Mobility" | "Other";
+type WorkoutType = string; // flexible, user-defined types like 'Bike', 'Calves', 'Resistance', 'Cardio'
 
 type WeeklyDay = {
   dateISO: string; // yyyy-mm-dd
-  types: Partial<Record<WorkoutType, boolean>>; // did I do this type today?
+  types: Partial<Record<string, boolean>>; // did I do this type today?
 };
 
 type WeeklyPlan = {
   weekOfISO: string; // Monday of week
   weekNumber: number; // Training week number
   days: WeeklyDay[]; // 7 days
-  benchmarks: Partial<Record<WorkoutType, number>>; // target days per type
-  customTypes: WorkoutType[]; // User's custom workout types
+  benchmarks: Partial<Record<string, number>>; // target days per type
+  customTypes: string[]; // User's custom workout types
 };
 
 type ResistanceExercise = {
@@ -38,6 +38,7 @@ type ResistanceSession = {
   exercises: ResistanceExercise[];
   completed: boolean;
   sessionTypes: WorkoutType[];
+  durationSec?: number;
 };
 
 // --- Utilities ---
@@ -95,30 +96,30 @@ function defaultSession(): ResistanceSession {
     ],
     completed: false,
     sessionTypes: ["Resistance"],
+    durationSec: 0,
   };
 }
 
 // --- Weekly Overview Component ---
 function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
-  const today = new Date().toISOString().split('T')[0];
-  const todayData = weekly.days.find(d => d.dateISO === today);
-  
+  // normalize today's ISO (yyyy-mm-dd) using local date
+  const today = toISO(new Date());
+  const todayData = weekly.days.find((d) => d.dateISO === today);
+
   const counts = useMemo(() => {
-    const c: Record<WorkoutType, number> = {
-      Bike: 0,
-      Calves: 0,
-      Resistance: 0,
-      Cardio: 0,
-      Mobility: 0,
-      Other: 0,
-    };
+    const c: Record<string, number> = {};
+    // initialize counts for custom types
+    weekly.customTypes.forEach((t) => (c[t] = 0));
     weekly.days.forEach((d) => {
       Object.keys(d.types).forEach((t) => {
-        if (d.types[t as WorkoutType]) c[t as WorkoutType] += 1;
+        if (d.types[t]) {
+          if (!(t in c)) c[t] = 0;
+          c[t] += 1;
+        }
       });
     });
     return c;
-  }, [weekly.days]);
+  }, [weekly.days, weekly.customTypes]);
 
   const totalToday = todayData ? Object.values(todayData.types).filter(Boolean).length : 0;
   const weekProgress = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -222,7 +223,6 @@ export default function WorkoutTrackerApp() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [booted, setBooted] = useState(false);
 
   // Offline cache is configured at Firestore initialization in lib/firebase
 
@@ -245,7 +245,7 @@ export default function WorkoutTrackerApp() {
           setUserName(null);
         }
       } finally {
-        setBooted(true);
+        // finished loading
       }
     });
     return () => unsub();
@@ -294,9 +294,10 @@ export default function WorkoutTrackerApp() {
         </header>
 
         <Tabs defaultValue="week" className="">
-          <TabsList className="grid grid-cols-2 w-full md:w-auto bg-white/80 backdrop-blur-sm border border-slate-200 shadow-sm">
+          <TabsList className="grid grid-cols-3 w-full md:w-auto bg-white/80 backdrop-blur-sm border border-slate-200 shadow-sm">
             <TabsTrigger value="week" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">Weekly Tracker</TabsTrigger>
             <TabsTrigger value="workout" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">Workout Session</TabsTrigger>
+            <TabsTrigger value="history" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">History</TabsTrigger>
           </TabsList>
 
           <TabsContent value="week" className="mt-4">
@@ -305,6 +306,10 @@ export default function WorkoutTrackerApp() {
 
           <TabsContent value="workout" className="mt-4">
             <WorkoutView session={session} setSession={setSession} onReset={resetSession} weekly={weekly} setWeekly={setWeekly} />
+          </TabsContent>
+
+          <TabsContent value="history" className="mt-4">
+            <HistoryView />
           </TabsContent>
         </Tabs>
       </div>
@@ -381,14 +386,8 @@ function WeeklyTracker({
   const types = weekly.customTypes;
 
   const counts = useMemo(() => {
-    const c: Record<WorkoutType, number> = {
-      Bike: 0,
-      Calves: 0,
-      Resistance: 0,
-      Cardio: 0,
-      Mobility: 0,
-      Other: 0,
-    };
+    const c: Record<string, number> = {};
+    types.forEach((t) => (c[t] = 0));
     weekly.days.forEach((d) => {
       types.forEach((t) => {
         if (d.types[t]) c[t] += 1;
@@ -398,6 +397,51 @@ function WeeklyTracker({
   }, [weekly.days, types]);
 
   const monday = new Date(weekly.weekOfISO);
+  const [newTypeName, setNewTypeName] = useState("");
+
+  const addType = () => {
+    const name = newTypeName.trim();
+    if (!name) return;
+    if (weekly.customTypes.includes(name)) {
+      setNewTypeName("");
+      return;
+    }
+    const updated = { ...weekly, customTypes: [...weekly.customTypes, name], benchmarks: { ...weekly.benchmarks, [name]: 0 } };
+    setWeekly(updated);
+    setNewTypeName("");
+  };
+
+  const removeType = (name: string) => {
+    const customTypes = weekly.customTypes.filter((t) => t !== name);
+    const benchmarks = { ...weekly.benchmarks };
+    delete benchmarks[name];
+    const days = weekly.days.map((d) => {
+      const types = { ...d.types };
+      delete types[name];
+      return { ...d, types };
+    });
+    setWeekly({ ...weekly, customTypes, benchmarks, days });
+  };
+
+  const renameType = (oldName: string, newName: string) => {
+    newName = newName.trim();
+    if (!newName || weekly.customTypes.includes(newName)) return;
+    const customTypes = weekly.customTypes.map((t) => (t === oldName ? newName : t));
+    const benchmarks: Record<string, number> = {};
+    Object.keys(weekly.benchmarks).forEach((k) => {
+      benchmarks[k === oldName ? newName : k] = weekly.benchmarks[k] ?? 0;
+    });
+    const days = weekly.days.map((d) => {
+      const types: Record<string, boolean> = {};
+      Object.keys(d.types).forEach((k) => {
+        types[k === oldName ? newName : k] = !!d.types[k];
+      });
+      return { ...d, types };
+    });
+    setWeekly({ ...weekly, customTypes, benchmarks, days });
+  };
+
+  // --- Render type management UI ---
   const prettyRange = `${monday.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${
     new Date(weekDates(monday)[6]).toLocaleDateString(undefined, { month: "short", day: "numeric" })
   }`;
@@ -415,6 +459,29 @@ function WeeklyTracker({
           </Button>
         </div>
       </CardHeader>
+      <CardContent>
+        <div className="mb-4">
+          <h4 className="text-sm font-semibold mb-2">Manage workout types</h4>
+          <div className="flex gap-2 items-center mb-2">
+            <Input value={newTypeName} onChange={(e) => setNewTypeName(e.target.value)} placeholder="New type name" />
+            <Button onClick={addType} className="ml-2"><Plus className="mr-2 h-4 w-4"/> Add Type</Button>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {weekly.customTypes.map((t) => (
+              <div key={t} className="flex items-center gap-2 bg-slate-100 px-2 py-1 rounded">
+                <span className="text-sm font-medium">{t}</span>
+                <button className="text-xs text-blue-600 hover:underline" onClick={() => {
+                  const newName = prompt('Rename type', t);
+                  if (newName) renameType(t, newName);
+                }}>Rename</button>
+                <button className="text-xs text-red-600 hover:underline" onClick={() => {
+                  if (confirm(`Remove type "${t}"? This will clear it from all days.`)) removeType(t);
+                }}>Remove</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </CardContent>
       <CardContent>
         <div className="overflow-x-auto">
           <table className="min-w-full border-separate border-spacing-0">
@@ -447,12 +514,17 @@ function WeeklyTracker({
                             active && "bg-green-100/70"
                           )}
                           onClick={() => {
-                            const days = [...weekly.days];
-                            const day = { ...days[idx] };
-                            day.types = { ...day.types, [t]: !active };
-                            days[idx] = day;
-                            setWeekly({ ...weekly, days });
-                          }}
+                              const days = [...weekly.days];
+                              const day = { ...days[idx] };
+                              const newTypes = { ...day.types, [t]: !active } as Record<string, boolean>;
+                              // If bike is toggled on, also mark Cardio
+                              if (t === 'Bike' && !active) newTypes['Cardio'] = true;
+                              // If Cardio turned off while Bike is on, keep Cardio if Bike is true
+                              if (t === 'Cardio' && !newTypes['Cardio'] && newTypes['Bike']) newTypes['Cardio'] = true;
+                              day.types = newTypes;
+                              days[idx] = day;
+                              setWeekly({ ...weekly, days });
+                            }}
                         >
                           {active ? <Check className="inline h-4 w-4" /> : ""}
                         </td>
@@ -508,6 +580,35 @@ function WorkoutView({
   weekly: WeeklyPlan;
   setWeekly: (w: WeeklyPlan) => void;
 }) {
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [timerSec, setTimerSec] = useState<number>(session.durationSec || 0);
+
+  useEffect(() => {
+    let id: any = null;
+    if (timerRunning) {
+      id = setInterval(() => setTimerSec((s) => s + 1), 1000);
+    }
+    return () => {
+      if (id) clearInterval(id);
+    };
+  }, [timerRunning]);
+
+  useEffect(() => {
+    // keep session.durationSec in sync while editing
+    setSession({ ...session, durationSec: timerSec });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timerSec]);
+
+  const formatTime = (s: number) => {
+    const mm = Math.floor(s / 60);
+    const ss = s % 60;
+    return `${mm.toString().padStart(2, '0')}:${ss.toString().padStart(2, '0')}`;
+  };
+
+  const resetTimer = () => {
+    setTimerRunning(false);
+    setTimerSec(0);
+  };
   const totalStats = useMemo(() => {
     const totalExercises = session.exercises.length;
     const totalSets = session.exercises.reduce((a, e) => a + e.sets.length, 0);
@@ -568,20 +669,87 @@ function WorkoutView({
 
   const completeWorkout = () => {
     // Mark session as completed
-    setSession({ ...session, completed: true });
+    setSession({ ...session, completed: true, durationSec: timerSec });
     
     // Auto-populate weekly tracker
     const today = session.dateISO;
     const todayIndex = weekly.days.findIndex(d => d.dateISO === today);
     if (todayIndex !== -1) {
       const updatedDays = [...weekly.days];
-      const markTypes: WorkoutType[] = [...session.sessionTypes];
+      const markTypes: string[] = [...session.sessionTypes];
       // if Bike is present, also mark Cardio implicitly
       if (markTypes.includes("Bike") && !markTypes.includes("Cardio")) markTypes.push("Cardio");
-      const newTypes = { ...updatedDays[todayIndex].types } as Partial<Record<WorkoutType, boolean>>;
+      const newTypes = { ...updatedDays[todayIndex].types } as Record<string, boolean>;
       markTypes.forEach((t) => { newTypes[t] = true; });
       updatedDays[todayIndex] = { ...updatedDays[todayIndex], types: newTypes };
       setWeekly({ ...weekly, days: updatedDays });
+    }
+    // persist completed session to Firestore under users/{uid}/sessions
+    (async () => {
+      try {
+        const uid = auth.currentUser?.uid;
+        if (!uid) return;
+        const payload = { ...session, durationSec: timerSec, completedAt: Date.now() };
+        await addDoc(collection(db, 'users', uid, 'sessions'), payload as any);
+      } catch (e) {
+        console.error('Failed to save completed session', e);
+      }
+    })();
+    // stop the timer when completed
+    setTimerRunning(false);
+  };
+
+  // Save current session as a routine/template (no results)
+  const saveRoutine = async () => {
+    try {
+      const uid = auth.currentUser?.uid;
+      if (!uid) {
+        alert('Please sign in to save routines');
+        return;
+      }
+      const payload = {
+        name: session.sessionName || 'Routine',
+        exercises: session.exercises.map((e) => ({ id: e.id, name: e.name, minSets: e.minSets, targetReps: e.targetReps })),
+        sessionTypes: session.sessionTypes,
+        createdAt: Date.now(),
+      };
+      const ref = collection(db, 'users', uid, 'routines');
+      await addDoc(ref, payload as any);
+      alert('Routine saved');
+    } catch (e) {
+      console.error('Save routine failed', e);
+      alert('Save failed');
+    }
+  };
+
+  const loadRoutines = async () => {
+    try {
+      const uid = auth.currentUser?.uid;
+      if (!uid) {
+        alert('Please sign in to load routines');
+        return;
+      }
+      const ref = collection(db, 'users', uid, 'routines');
+      const snaps = await getDocs(ref);
+      const items = snaps.docs.map((s) => ({ id: s.id, ...(s.data() as any) }));
+      if (items.length === 0) {
+        alert('No routines saved');
+        return;
+      }
+      const names = items.map((it) => it.name).join('\n');
+      const pick = prompt('Available routines:\n' + names + '\n\nType the exact name to load');
+      if (!pick) return;
+      const found = items.find((it) => it.name === pick);
+      if (!found) {
+        alert('Routine not found');
+        return;
+      }
+      // Populate session with template (no sets/results)
+      const exercises = (found.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
+      setSession({ ...session, sessionName: found.name, exercises, completed: false, sessionTypes: found.sessionTypes || [] });
+    } catch (e) {
+      console.error('Load routines failed', e);
+      alert('Load failed');
     }
   };
 
@@ -599,13 +767,24 @@ function WorkoutView({
                   placeholder="Workout name (e.g., Legs, Upper Body)"
                 />
                 <p className="text-sm text-slate-600 mt-1">
-                  {new Date(session.dateISO).toLocaleDateString('en-US', { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric' 
-                  })}
+                    {new Date(session.dateISO + 'T00:00').toLocaleDateString('en-US', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                    })}
                 </p>
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <div className="text-sm text-neutral-700">Timer: {formatTime(timerSec)}</div>
+                <div className="flex gap-2">
+                  {!timerRunning ? (
+                    <Button onClick={() => setTimerRunning(true)}>Start</Button>
+                  ) : (
+                    <Button variant="destructive" onClick={() => setTimerRunning(false)}>Pause</Button>
+                  )}
+                  <Button variant="outline" onClick={resetTimer}>Reset</Button>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <Input
@@ -642,6 +821,12 @@ function WorkoutView({
       <div className="flex gap-2">
         <Button onClick={addExercise}>
           <Plus className="mr-2 h-4 w-4" /> Add exercise
+        </Button>
+        <Button variant="outline" onClick={loadRoutines}>
+          Load Routine
+        </Button>
+        <Button variant="secondary" onClick={saveRoutine}>
+          <Save className="mr-2 h-4 w-4"/> Save Routine
         </Button>
         <Button variant="secondary" onClick={onReset}>
           <RefreshCw className="mr-2 h-4 w-4" /> New session
@@ -800,5 +985,61 @@ function ExerciseCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function HistoryView() {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const uid = auth.currentUser?.uid;
+        if (!uid) {
+          setItems([]);
+          setLoading(false);
+          return;
+        }
+        const ref = collection(db, 'users', uid, 'sessions');
+        const snaps = await getDocs(ref);
+        const data = snaps.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        if (mounted) setItems(data.sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0)));
+      } catch (e) {
+        console.error('Load history failed', e);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    load();
+    return () => { mounted = false; };
+  }, []);
+
+  if (loading) return <div>Loading...</div>;
+  if (items.length === 0) return <div className="text-sm text-neutral-600">No history yet. Complete sessions will appear here.</div>;
+
+  return (
+    <div className="space-y-3">
+      {items.map((it) => (
+        <Card key={it.id}>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-semibold">{it.sessionName}</div>
+                <div className="text-xs text-neutral-600">{new Date((it.completedAt || it.ts || Date.now()) ).toLocaleString()}</div>
+              </div>
+              <div className="text-sm text-neutral-600">{(it.exercises || []).length} exercises</div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-sm">
+              {(it.sessionTypes || []).join(', ')}
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
   );
 }
