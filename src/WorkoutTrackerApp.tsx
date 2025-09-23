@@ -24,6 +24,7 @@ type WeeklyPlan = {
   days: WeeklyDay[]; // 7 days
   benchmarks: Partial<Record<string, number>>; // target days per type
   customTypes: string[]; // User's custom workout types
+  typeCategories?: Record<string, string>; // optional mapping type -> category (e.g., Bike: Cardio)
 };
 
 type ResistanceExercise = {
@@ -100,7 +101,8 @@ function defaultWeekly(): WeeklyPlan {
     days,
     // default weekly benchmarks (editable per week)
     benchmarks: { Bike: 3, Calves: 4, Resistance: 2, Cardio: 2, Mobility: 2, Other: 1 },
-    customTypes: ["Bike", "Calves", "Resistance"],
+  customTypes: ["Bike", "Calves", "Rings"],
+  typeCategories: { Bike: 'Cardio', Calves: 'None', Rings: 'Resistance' },
   };
 }
 
@@ -109,11 +111,24 @@ const LS_TYPES_KEY = "workout:types";
 function loadGlobalTypes(): string[] {
   try {
     const raw = localStorage.getItem(LS_TYPES_KEY);
-    if (!raw) return ["Bike", "Calves", "Resistance"];
+    if (!raw) return ["Bike", "Calves", "Rings"];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : ["Bike", "Calves", "Resistance"];
+    if (Array.isArray(parsed.types)) return parsed.types;
+    if (Array.isArray(parsed)) return parsed;
+    return ["Bike", "Calves", "Rings"];
   } catch {
-    return ["Bike", "Calves", "Resistance"];
+    return ["Bike", "Calves", "Rings"];
+  }
+}
+function loadTypeCategories(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(LS_TYPES_KEY);
+    if (!raw) return { Bike: 'Cardio', Calves: 'None', Rings: 'Resistance' };
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && parsed.categories) return parsed.categories;
+    return { Bike: 'Cardio', Calves: 'None', Rings: 'Resistance' };
+  } catch {
+    return { Bike: 'Cardio', Calves: 'None', Rings: 'Resistance' };
   }
 }
 
@@ -198,9 +213,19 @@ async function rebuildWeeklyFromSessions(uid: string, baseWeekly: WeeklyPlan, se
   }
 }
 
-function saveGlobalTypes(types: string[]) {
+function saveGlobalTypes(types: string[], categories?: Record<string, string>) {
   try {
-    localStorage.setItem(LS_TYPES_KEY, JSON.stringify(types));
+    const payload: any = { types };
+    if (categories) payload.categories = categories;
+    // preserve existing categories if present and not overwritten
+    try {
+      const raw = localStorage.getItem(LS_TYPES_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (!payload.categories && parsed && parsed.categories) payload.categories = parsed.categories;
+      }
+    } catch {}
+    localStorage.setItem(LS_TYPES_KEY, JSON.stringify(payload));
   } catch (e) {
     console.warn("Failed to save global types", e);
   }
@@ -244,81 +269,53 @@ function saveLocalRoutine(item: any) {
 function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
   // normalize today's ISO (yyyy-mm-dd) using local date
   const today = toISO(new Date());
-  const todayData = weekly.days.find((d) => d.dateISO === today);
 
+  // New behavior: counts are simple checkbox counts only (the user requested
+  // the header counters to reflect clicks). We ignore sessionsList/sessions
+  // for these counters entirely.
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
-    // initialize counts for custom types
     weekly.customTypes.forEach((t) => (c[t] = 0));
-    // If sessionsList is present, count per-session rather than per-type checkboxes
-    let usedSessionsList = false;
     weekly.days.forEach((d) => {
-      if (Array.isArray(d.sessionsList) && d.sessionsList.length > 0) {
-        usedSessionsList = true;
-        // Count each session's declared types (per-session counts)
-        const typesSeenInSessions = new Set<string>();
-        d.sessionsList.forEach((s) => {
-          (s.sessionTypes || []).forEach((t) => {
-            typesSeenInSessions.add(t);
-            if (!(t in c)) c[t] = 0;
-            c[t] += 1;
-          });
-        });
-        // Also consider any checkbox types for the day that are not represented
-        // in the session documents. This handles cases where a manual session
-        // doc exists but lacks sessionTypes (or was created empty) — we want
-        // the user's recent clicks to still show up in the header.
-        Object.keys(d.types || {}).forEach((t) => {
-          if (d.types[t]) {
-            if (!typesSeenInSessions.has(t)) {
-              if (!(t in c)) c[t] = 0;
-              c[t] += 1; // treat the checkbox as one session for this type
-            }
-          }
-        });
-      }
-    });
-    if (!usedSessionsList) {
-      // fallback to counting type checkboxes; treat Bike as Cardio as well
-      weekly.days.forEach((d) => {
-        Object.keys(d.types).forEach((t) => {
-          if (d.types[t]) {
-            if (!(t in c)) c[t] = 0;
-            c[t] += 1;
-          }
-        });
-        // if Bike is checked but Cardio isn't, count it as Cardio
-        if (d.types['Bike']) {
-          if (!('Cardio' in c)) c['Cardio'] = 0;
-          if (!d.types['Cardio']) c['Cardio'] += 1;
+      Object.keys(d.types || {}).forEach((t) => {
+        if (d.types[t]) {
+          if (!(t in c)) c[t] = 0;
+          c[t] += 1;
         }
       });
-    }
-  console.debug('[WT] WeeklyOverview counts computed', safeString({ counts: c, usedSessionsList, days: weekly.days.map(d => ({ dateISO: d.dateISO, types: d.types, sessions: d.sessions, sessionsList: d.sessionsList })) }));
+    });
+    console.debug('[WT] WeeklyOverview counts computed', safeString({ counts: c, days: weekly.days.map(d => ({ dateISO: d.dateISO, types: d.types, sessions: d.sessions, sessionsList: d.sessionsList })) }));
     return c;
   }, [weekly.days, weekly.customTypes]);
 
-  // Use sessionsList as authoritative source for distinct sessions
-  // Total today should reflect actual persisted sessions (sessionsList) or legacy sessions count.
-  // Do NOT treat checked types as sessions here — that was causing inflated totals.
-  const totalToday = todayData
-    ? (Array.isArray(todayData.sessionsList) && todayData.sessionsList.length > 0
-        ? todayData.sessionsList.length
-        : (typeof todayData.sessions === 'number' && todayData.sessions > 0 ? todayData.sessions : 0))
-    : 0;
-
-  // Compute week progress as a simple sum of per-day session counts.
-  // Per-day session count priority:
-  // 1) sessionsList.length (authoritative)
-  // 2) legacy sessions number
-  // 3) if any type checkbox is set -> count as 1
-  const perDayCounts = weekly.days.map((d) => {
-    if (Array.isArray(d.sessionsList) && d.sessionsList.length > 0) return d.sessionsList.length;
-    if (typeof d.sessions === 'number' && d.sessions > 0) return d.sessions;
-    const hasAnyType = Object.values(d.types || {}).some(Boolean);
-    return hasAnyType ? 1 : 0;
+  // New simple counters based purely on checkbox clicks (no sessionsList/sessions):
+  // Defensive: compute from a cleaned snapshot so we do strict boolean counting
+  const cleanedDays = weekly.days.map(d => {
+    const types: Record<string, boolean> = {};
+    Object.keys(d.types || {}).forEach(k => { const kk = String(k).trim(); if (kk) types[kk] = !!d.types[k]; });
+    return { ...d, types };
   });
-  const weekProgress = perDayCounts.reduce((a, b) => a + b, 0);
+  const todayDone = (() => {
+    const td = cleanedDays.find((d) => d.dateISO === today);
+    if (!td) return 0;
+    // simple raw count of checked workouts for the day
+    return Object.keys(td.types || {}).filter(k => td.types[k]).length;
+  })();
+  const weekDone = cleanedDays.reduce((acc, d) => {
+    // raw count of checked workouts for the day
+    return acc + Object.keys(d.types || {}).filter(k => d.types[k]).length;
+  }, 0);
+
+  // Category counts: sum clicks for types that map to a category.
+  const typeCats = weekly.typeCategories || {};
+  // Only count types whose category is 'Resistance' (e.g., Rings, Weights, etc.)
+  // Category counts: sum checked workouts that map to the category
+  const resistanceCount = cleanedDays.reduce((acc, d) => {
+    return acc + Object.keys(d.types || {}).filter(t => d.types[t] && typeCats[t] === 'Resistance').length;
+  }, 0);
+  const cardioCount = cleanedDays.reduce((acc, d) => {
+    return acc + Object.keys(d.types || {}).filter(t => d.types[t] && (typeCats[t] === 'Cardio' || t === 'Bike' || t === 'Cardio')).length;
+  }, 0);
 
   // debug: compute unique session ids across the week and show per-day details
     try {
@@ -326,9 +323,9 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
     weekly.days.forEach((d) => {
       (d.sessionsList || []).forEach((s: any) => { if (s?.id) allIds.push(String(s.id)); else allIds.push(JSON.stringify(s.sessionTypes || s)); });
     });
-    const uniqueIds = Array.from(new Set(allIds));
-    const perDay = weekly.days.map(d => ({ dateISO: d.dateISO, sessionsList: (d.sessionsList || []).map((s:any)=> ({ id: s?.id, sessionTypes: s.sessionTypes })) , sessions: d.sessions }));
-    console.debug('[WT] Week summary', safeString({ weekOfISO: weekly.weekOfISO, weekProgress, uniqueSessionCount: uniqueIds.length, uniqueIds, perDay, counts }));
+  const uniqueIds = Array.from(new Set(allIds));
+  const perDay = weekly.days.map(d => ({ dateISO: d.dateISO, sessionsList: (d.sessionsList || []).map((s:any)=> ({ id: s?.id, sessionTypes: s.sessionTypes })) , sessions: d.sessions }));
+  console.debug('[WT] Week summary', safeString({ weekOfISO: weekly.weekOfISO, weekClicks: weekly.days.reduce((acc,d)=>acc+Object.values(d.types||{}).filter(Boolean).length,0), uniqueSessionCount: uniqueIds.length, uniqueIds, perDay, counts }));
   } catch (e) {
     console.warn('[WT] Week summary debug failed', safeString(e));
   }
@@ -360,8 +357,8 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-blue-100 text-sm font-medium">Today</p>
-                <p className="text-3xl font-bold">{totalToday}</p>
-                <p className="text-blue-200 text-xs">workouts completed</p>
+                <p className="text-3xl font-bold">{todayDone}</p>
+                <p className="text-blue-200 text-xs">Done today</p>
               </div>
               <div className="w-12 h-12 bg-blue-400 rounded-full flex items-center justify-center">
                 <span className="text-2xl">🏋️</span>
@@ -376,8 +373,8 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-indigo-100 text-sm font-medium">This Week</p>
-              <p className="text-3xl font-bold">{weekProgress}</p>
-              <p className="text-indigo-200 text-xs">total sessions</p>
+              <p className="text-3xl font-bold">{weekDone}</p>
+              <p className="text-indigo-200 text-xs">Done this week</p>
             </div>
             <div className="w-12 h-12 bg-indigo-400 rounded-full flex items-center justify-center">
               <span className="text-2xl">📊</span>
@@ -391,9 +388,9 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
         <CardContent className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-emerald-100 text-sm font-medium">Resistance</p>
-              <p className="text-3xl font-bold">{counts.Resistance}</p>
-              <p className="text-emerald-200 text-xs">sessions this week</p>
+              <p className="text-emerald-100 text-sm font-medium">Resistance Training</p>
+              <p className="text-3xl font-bold">{resistanceCount}</p>
+              <p className="text-emerald-200 text-xs">Done this week</p>
             </div>
             <div className="w-12 h-12 bg-emerald-400 rounded-full flex items-center justify-center">
               <span className="text-2xl">💪</span>
@@ -408,8 +405,8 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-orange-100 text-sm font-medium">Cardio</p>
-              <p className="text-3xl font-bold">{counts.Cardio}</p>
-              <p className="text-orange-200 text-xs">sessions this week</p>
+              <p className="text-3xl font-bold">{cardioCount}</p>
+              <p className="text-orange-200 text-xs">Done this week</p>
             </div>
             <div className="w-12 h-12 bg-orange-400 rounded-full flex items-center justify-center">
               <span className="text-2xl">🏃</span>
@@ -454,6 +451,12 @@ export default function WorkoutTrackerApp() {
                 const uniq = ensureUniqueTypes(data.weekly.customTypes || []);
                   let normalized = normalizeWeekly({ ...data.weekly, customTypes: uniq } as WeeklyPlan);
                   console.debug('[WT] Loaded per-week state (raw)', safeString({ uid: u.uid, week: toISO(getMonday()), normalized }));
+                  // if the loaded weekly has no customTypes, merge defaults from local/global settings
+                  if (!normalized.customTypes || normalized.customTypes.length === 0) {
+                    const globals = loadGlobalTypes();
+                    const categories = loadTypeCategories();
+                    normalized = normalizeWeekly({ ...normalized, customTypes: globals, typeCategories: { ...(normalized.typeCategories||{}), ...(categories||{}) } } as WeeklyPlan);
+                  }
                   // Always attempt to reconstruct sessionsList from users/{uid}/sessions collection
                   try {
                     const snaps = await getDocs(collection(db, 'users', u.uid, 'sessions'));
@@ -519,11 +522,24 @@ export default function WorkoutTrackerApp() {
             const settingsRef = doc(db, 'users', u.uid, 'settings', 'types');
             const sSnap = await getDoc(settingsRef);
             if (sSnap.exists()) {
-              const t = sSnap.data()?.types;
+              const data = sSnap.data() as any;
+              const t = data?.types;
+              const cats = data?.categories || data?.typeCategories || {};
               if (Array.isArray(t) && t.length > 0) {
                   const custom = ensureUniqueTypes(t);
-                  console.debug('[WT] Loaded global types from settings', safeString({ uid: u.uid, custom }));
-                  setWeekly((prev) => normalizeWeekly({ ...prev, customTypes: custom } as WeeklyPlan));
+                  console.debug('[WT] Loaded global types from settings', safeString({ uid: u.uid, custom, categories: cats }));
+                  // apply both custom types and categories to weekly state
+                  setWeekly((prev) => normalizeWeekly({ ...prev, customTypes: custom, typeCategories: { ...(prev.typeCategories || {}), ...(cats || {}) } } as WeeklyPlan));
+                  // persist categories to localStorage for fast local loads
+                  try { saveGlobalTypes(custom, { ...(loadTypeCategories() || {}), ...(cats || {}) }); } catch (e) { /* ignore */ }
+              } else if (cats && Object.keys(cats).length > 0) {
+                  // if only categories present, merge into weekly and persist locally
+                  console.debug('[WT] Loaded categories from settings', safeString({ uid: u.uid, categories: cats }));
+                  setWeekly((prev) => {
+                    const updated = { ...prev, typeCategories: { ...(prev.typeCategories || {}), ...(cats || {}) } } as WeeklyPlan;
+                    try { saveGlobalTypes(updated.customTypes || loadGlobalTypes(), { ...(loadTypeCategories() || {}), ...(cats || {}) }); } catch (e) { /* ignore */ }
+                    return normalizeWeekly(updated);
+                  });
               }
             }
           } catch (e) {
@@ -635,6 +651,84 @@ export default function WorkoutTrackerApp() {
                   Sign in
                 </Button>
               )}
+              <Button variant="ghost" onClick={() => {
+                // Rich debug dump: compute from a cleaned copy of weekly (defensive normalization)
+                try {
+                  const cleanedDays = weekly.days.map(d => {
+                    const types: Record<string, boolean> = {};
+                    Object.keys(d.types || {}).forEach(k => { types[String(k).trim()] = !!d.types[k]; });
+                    const any = Object.values(types).some(Boolean);
+                    return { ...d, types, sessionsList: any ? (d.sessionsList || []) : [], sessions: any ? (d.sessions || (d.sessionsList||[]).length) : 0 };
+                  });
+                  const perDay = cleanedDays.map(d => ({ dateISO: d.dateISO, types: d.types, dayTotal: Object.values(d.types||{}).filter(Boolean).length, sessionsListLen: (d.sessionsList||[]).length }));
+                  const typeTotals: Record<string, number> = {};
+                  (weekly.customTypes || []).forEach(t => typeTotals[t] = cleanedDays.reduce((a,d) => a + (d.types?.[t] ? 1 : 0), 0));
+                  const todayIso = toISO(new Date());
+                  const todayDay = cleanedDays.find(d => d.dateISO === todayIso);
+                  const todayCount = todayDay ? Object.values(todayDay.types||{}).filter(Boolean).length : 0;
+                  const weekCount = cleanedDays.reduce((acc,d) => acc + Object.values(d.types||{}).filter(Boolean).length, 0);
+                  const typeCats = weekly.typeCategories || {};
+                  const resistanceCountLocal = (weekly.customTypes || []).reduce((acc, t) => (typeCats[t] === 'Resistance' ? acc + cleanedDays.reduce((a,d) => a + (d.types[t] ? 1 : 0), 0) : acc), 0);
+                  // compute cardio like the UI: normalize Bike/Cardio per day
+                  const cardioCountLocal = cleanedDays.reduce((acc, d) => {
+                    const keys = Object.keys(d.types || {}).filter(k => d.types[k]);
+                    const seen = new Set<string>();
+                    keys.forEach((t) => {
+                      if (t === 'Bike' || t === 'Cardio' || typeCats[t] === 'Cardio') seen.add('Cardio');
+                    });
+                    return acc + seen.size;
+                  }, 0);
+                  const computed = { today: todayCount, week: weekCount, resistance: resistanceCountLocal, cardio: cardioCountLocal };
+                  console.debug('[WT] DEBUG DUMP', safeString({ userId, userName, weekOfISO: weekly.weekOfISO, perDay, typeTotals, typeCategories: weekly.typeCategories || {}, computed }));
+                } catch (e) {
+                  console.debug('[WT] DEBUG DUMP FAILED', e);
+                }
+              }}>
+                Debug dump
+              </Button>
+              <Button variant="ghost" onClick={async () => {
+                // Clear all checks for the current week and persist to Firestore (if signed in)
+                try {
+                  const uid = auth.currentUser?.uid;
+                  const cleaned = { ...weekly, days: weekly.days.map(d => ({ ...d, types: {}, sessions: 0, sessionsList: [] })) } as WeeklyPlan;
+                  setWeekly(normalizeWeekly(cleaned));
+                  if (uid) {
+                    await setDoc(doc(db, 'users', uid, 'state', cleaned.weekOfISO), { weekly: cleaned }, { merge: true });
+                    console.debug('[WT] Cleared all checks and persisted cleaned weekly', safeString({ uid, weekOfISO: cleaned.weekOfISO }));
+                  } else {
+                    console.debug('[WT] Cleared all checks locally (not signed in)');
+                  }
+                } catch (e) {
+                  console.warn('[WT] Failed to clear checks', e);
+                }
+              }}>
+                Clear all checks (persist)
+              </Button>
+              <Button variant="ghost" onClick={async () => {
+                // Fix Bike/Cardio duplicates: for days where both Bike and Cardio are checked, uncheck Cardio and persist
+                try {
+                  const uid = auth.currentUser?.uid;
+                  const repaired = { ...weekly, days: weekly.days.map(d => {
+                    const types: Record<string, boolean> = {};
+                    Object.keys(d.types || {}).forEach(k => { types[String(k).trim()] = !!d.types[k]; });
+                    if (types['Bike'] && types['Cardio']) {
+                      types['Cardio'] = false;
+                    }
+                    return { ...d, types } as any;
+                  }) } as WeeklyPlan;
+                  setWeekly(normalizeWeekly(repaired));
+                  if (uid) {
+                    await setDoc(doc(db, 'users', uid, 'state', repaired.weekOfISO), { weekly: repaired }, { merge: true });
+                    console.debug('[WT] Fixed Bike/Cardio duplicates and persisted cleaned weekly', safeString({ uid, weekOfISO: repaired.weekOfISO }));
+                  } else {
+                    console.debug('[WT] Fixed Bike/Cardio duplicates locally (not signed in)');
+                  }
+                } catch (e) {
+                  console.warn('[WT] Failed to repair Bike/Cardio duplicates', e);
+                }
+              }}>
+                Fix Bike/Cardio duplicates (persist)
+              </Button>
             </div>
           </div>
           
@@ -772,38 +866,30 @@ function WeeklyTracker({
   const types = weekly.customTypes;
 
   const counts = useMemo(() => {
+    // Counts should mirror the header: simple checkbox counts only.
     const c: Record<string, number> = {};
     types.forEach((t) => (c[t] = 0));
-    let usedSessionsList = false;
     weekly.days.forEach((d) => {
-      if (Array.isArray(d.sessionsList) && d.sessionsList.length > 0) {
-        usedSessionsList = true;
-        d.sessionsList.forEach((s) => {
-          (s.sessionTypes || []).forEach((t) => { if (!(t in c)) c[t] = 0; c[t] += 1; });
-        });
+      types.forEach((t) => { if (d.types[t]) c[t] += 1; });
+      // Bike implies Cardio for totals when Cardio not explicitly checked
+      if (d.types['Bike']) {
+        if (!('Cardio' in c)) c['Cardio'] = 0;
+        if (!d.types['Cardio']) c['Cardio'] += 1;
       }
     });
-    if (!usedSessionsList) {
-      weekly.days.forEach((d) => {
-        types.forEach((t) => { if (d.types[t]) c[t] += 1; });
-        // Bike implies Cardio for totals when Cardio not explicitly checked
-        if (d.types['Bike']) {
-          if (!('Cardio' in c)) c['Cardio'] = 0;
-          if (!d.types['Cardio']) c['Cardio'] += 1;
-        }
-      });
-    }
     return c;
   }, [weekly.days, types]);
 
   const monday = new Date(weekly.weekOfISO);
   const [newTypeName, setNewTypeName] = useState("");
+  const [newTypeCategory, setNewTypeCategory] = useState<string>("None");
 
   // On mount, ensure weekly.customTypes is populated from global settings if needed
   useEffect(() => {
     if (!weekly.customTypes || weekly.customTypes.length === 0) {
       const globals = loadGlobalTypes();
-      setWeekly({ ...weekly, customTypes: globals });
+      const categories = loadTypeCategories();
+      setWeekly({ ...weekly, customTypes: globals, typeCategories: categories });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -815,16 +901,18 @@ function WeeklyTracker({
       setNewTypeName("");
       return;
     }
-    const updated = { ...weekly, customTypes: [...weekly.customTypes, name], benchmarks: { ...weekly.benchmarks, [name]: 0 } };
+    const updatedCats = { ...(weekly.typeCategories || {}) } as Record<string,string>;
+    updatedCats[name] = newTypeCategory || 'None';
+    const updated = { ...weekly, customTypes: [...weekly.customTypes, name], benchmarks: { ...weekly.benchmarks, [name]: 0 }, typeCategories: updatedCats };
     setWeekly(updated);
-    saveGlobalTypes(updated.customTypes);
+    saveGlobalTypes(updated.customTypes, updatedCats);
     // save to Firestore if user signed in
     (async () => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
       try {
         const ref = doc(db, 'users', uid, 'settings', 'types');
-        await setDoc(ref, { types: updated.customTypes }, { merge: true });
+        await setDoc(ref, { types: updated.customTypes, categories: updated.typeCategories || {} }, { merge: true });
       } catch (e) {
         console.warn('Failed to save types to Firestore', e);
       }
@@ -841,12 +929,14 @@ function WeeklyTracker({
       delete types[name];
       return { ...d, types };
     });
-    setWeekly({ ...weekly, customTypes, benchmarks, days });
-    saveGlobalTypes(customTypes);
+  const newCats = { ...(weekly.typeCategories || {}) };
+  delete newCats[name];
+  setWeekly({ ...weekly, customTypes, benchmarks, days, typeCategories: newCats });
+  saveGlobalTypes(customTypes, newCats);
     (async () => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      try { await setDoc(doc(db, 'users', uid, 'settings', 'types'), { types: customTypes }, { merge: true }); } catch (e) { console.warn('Failed to save types to Firestore', e); }
+      try { await setDoc(doc(db, 'users', uid, 'settings', 'types'), { types: customTypes, categories: newCats }, { merge: true }); } catch (e) { console.warn('Failed to save types to Firestore', e); }
     })();
   };
 
@@ -865,12 +955,15 @@ function WeeklyTracker({
       });
       return { ...d, types };
     });
-    setWeekly({ ...weekly, customTypes, benchmarks, days });
-    saveGlobalTypes(customTypes);
+  // also update categories mapping
+  const cats: Record<string,string> = {};
+  Object.keys(weekly.typeCategories || {}).forEach(k => { cats[k === oldName ? newName : k] = weekly.typeCategories?.[k] ?? 'None'; });
+  setWeekly({ ...weekly, customTypes, benchmarks, days, typeCategories: cats });
+  saveGlobalTypes(customTypes, cats);
     (async () => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      try { await setDoc(doc(db, 'users', uid, 'settings', 'types'), { types: customTypes }, { merge: true }); } catch (e) { console.warn('Failed to save types to Firestore', e); }
+      try { await setDoc(doc(db, 'users', uid, 'settings', 'types'), { types: customTypes, categories: cats }, { merge: true }); } catch (e) { console.warn('Failed to save types to Firestore', e); }
     })();
   };
 
@@ -978,6 +1071,36 @@ function WeeklyTracker({
               alert('Rebuilt weekly from sessions and saved');
             } catch (e) { console.error('Rebuild failed', e); alert('Rebuild failed - see console'); }
           }}>Rebuild from sessions</Button>
+          <Button variant="destructive" onClick={async () => {
+            if (!confirm('Clear all checked boxes for this week? This cannot be undone.')) return;
+            const clearedDays = weekly.days.map(d => ({ ...d, types: {}, sessionsList: [], sessions: 0 }));
+            const newWeekly = normalizeWeekly({ ...weekly, days: clearedDays } as WeeklyPlan);
+            setWeekly(newWeekly);
+            const uid = auth.currentUser?.uid;
+            if (uid) {
+              try { await setDoc(doc(db, 'users', uid, 'state', newWeekly.weekOfISO), { weekly: newWeekly }, { merge: true }); alert('Cleared week'); } catch (e) { console.warn('Failed to persist cleared week', e); alert('Cleared locally but failed to persist'); }
+            } else {
+              alert('Cleared locally');
+            }
+          }}>Clear all checks</Button>
+          <Button variant="outline" onClick={async () => {
+            if (!confirm('Fix Bike/Cardio duplicates for this week? This will uncheck Cardio on days where Bike is checked.')) return;
+            const fixedDays = weekly.days.map(d => {
+              const types = { ...(d.types || {}) } as Record<string, boolean>;
+              if (types['Bike'] && types['Cardio']) {
+                types['Cardio'] = false;
+              }
+              return { ...d, types };
+            });
+            const newWeekly = normalizeWeekly({ ...weekly, days: fixedDays } as WeeklyPlan);
+            setWeekly(newWeekly);
+            const uid = auth.currentUser?.uid;
+            if (uid) {
+              try { await setDoc(doc(db, 'users', uid, 'state', newWeekly.weekOfISO), { weekly: newWeekly }, { merge: true }); alert('Fixed duplicates and saved'); } catch (e) { console.warn('Failed to persist fixed week', e); alert('Fixed locally but failed to persist'); }
+            } else {
+              alert('Fixed locally');
+            }
+          }}>Fix Bike/Cardio duplicates</Button>
         </div>
       </CardHeader>
       {/* Weekly table */}
@@ -990,12 +1113,35 @@ function WeeklyTracker({
           <div className="mt-2">
             <div className="flex gap-2 items-center mb-2">
               <Input value={newTypeName} onChange={(e) => setNewTypeName(e.target.value)} placeholder="New type name" />
+              <select value={newTypeCategory} onChange={(e) => setNewTypeCategory(e.target.value)} className="border rounded px-2 py-1">
+                <option>None</option>
+                <option>Cardio</option>
+                <option>Resistance</option>
+                <option>Mindfulness</option>
+              </select>
               <Button onClick={addType} className="ml-2"><Plus className="mr-2 h-4 w-4"/> Add Type</Button>
             </div>
             <div className="flex gap-2 flex-wrap">
               {weekly.customTypes.map((t) => (
                 <div key={t} className="flex items-center gap-2 bg-slate-100 px-2 py-1 rounded">
                   <span className="text-sm font-medium">{t}</span>
+                  <select value={(weekly.typeCategories||{})[t] || 'None'} onChange={async (e) => {
+                    const newCat = e.target.value;
+                    const updatedCats = { ...(weekly.typeCategories || {}) } as Record<string,string>;
+                    updatedCats[t] = newCat;
+                    const updated = { ...weekly, typeCategories: updatedCats } as WeeklyPlan;
+                    setWeekly(normalizeWeekly(updated));
+                    saveGlobalTypes(updated.customTypes, updatedCats);
+                    const uid = auth.currentUser?.uid;
+                    if (uid) {
+                      try { await setDoc(doc(db, 'users', uid, 'settings', 'types'), { categories: updatedCats, types: updated.customTypes }, { merge: true }); } catch (e) { console.warn('Failed to save categories to Firestore', e); }
+                    }
+                  }} className="text-xs p-1 border rounded">
+                    <option>None</option>
+                    <option>Cardio</option>
+                    <option>Resistance</option>
+                    <option>Mindfulness</option>
+                  </select>
                   <button className="text-xs text-blue-600 hover:underline" onClick={() => openRename(t)}>Rename</button>
                   <button className="text-xs text-red-600 hover:underline" onClick={() => openRemove(t)}>Remove</button>
                 </div>
@@ -1036,13 +1182,17 @@ function WeeklyTracker({
           <table className="min-w-full border-separate border-spacing-0">
             <thead>
               <tr>
-                <th className="sticky left-0 bg-white text-left p-2 border-b">Type</th>
+                <th className="sticky left-0 bg-white text-left p-2 border-b">Workout</th>
                 {weekly.days.map((d) => (
                   <th key={d.dateISO} className="p-2 text-xs font-medium border-b">
                     {new Date(d.dateISO + 'T00:00').toLocaleDateString(undefined, { weekday: "short" })}
                     <div className="text-[10px] text-neutral-500">{new Date(d.dateISO + 'T00:00').getDate()}</div>
                     <div className="text-[10px] mt-1">
-                      <span className="inline-block bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-[10px]">{(d.sessionsList||[]).length} sessions</span>
+                      {(() => {
+                        const list = d.sessionsList || [];
+                        const real = list.filter((s:any) => s?.id && !String(s.id).startsWith('manual:')).length;
+                        return (<span className="inline-block bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-[10px]">{real} sessions</span>);
+                      })()}
                     </div>
                   </th>
                 ))}
@@ -1069,10 +1219,9 @@ function WeeklyTracker({
                               const days = [...weekly.days];
                               const day = { ...days[idx] };
                               const newTypes = { ...day.types, [t]: !active } as Record<string, boolean>;
-                              // If bike is toggled on, also mark Cardio
-                              if (t === 'Bike' && !active) newTypes['Cardio'] = true;
-                              // If Cardio turned off while Bike is on, keep Cardio if Bike is true
-                              if (t === 'Cardio' && !newTypes['Cardio'] && newTypes['Bike']) newTypes['Cardio'] = true;
+                              // Note: do NOT auto-toggle 'Cardio' when Bike is toggled to avoid double-counting.
+                              // Cardio totals are computed from category mappings (Bike counts toward Cardio in the header),
+                              // but we keep the checkboxes independent so the UI reflects exactly what you checked.
                               console.debug('[WT] toggleType cell', safeString({ type: t, dateISO: days[idx].dateISO, before: day.types, after: newTypes, idx }));
                               day.types = newTypes;
 
