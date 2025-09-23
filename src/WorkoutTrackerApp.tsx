@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
-import { doc, getDoc, setDoc, collection, addDoc, getDocs } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, addDoc, getDocs, deleteDoc } from "firebase/firestore";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -326,13 +326,36 @@ export default function WorkoutTrackerApp() {
     }
   }, [userId, weekly, session]);
 
-  // dev: log weekly types/benchmarks after initial load for debugging
-  useEffect(() => {
-    if (!initialized) return;
-    console.debug('Weekly loaded:', { weekOfISO: weekly.weekOfISO, types: weekly.customTypes, benchmarks: weekly.benchmarks });
-  }, [initialized]);
+  // (debugging removed) -- no console.debug left
 
-  const resetWeek = () => setWeekly(defaultWeekly());
+  const resetWeek = async () => {
+    const base = defaultWeekly();
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      setWeekly(base);
+      return;
+    }
+    try {
+      const monday = getMonday();
+      const prev = new Date(monday);
+      prev.setDate(monday.getDate() - 7);
+      const prevISO = toISO(prev);
+      const ref = doc(db, 'users', uid, 'state', prevISO);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        setWeekly(base);
+        return;
+      }
+      const data = snap.data() as PersistedState;
+      const weeklyFromPrev = data.weekly || {} as WeeklyPlan;
+      const benchmarks = { ...base.benchmarks, ...(weeklyFromPrev.benchmarks || {}) } as Record<string, number>;
+      const customTypes = ensureUniqueTypes([...(weeklyFromPrev.customTypes || base.customTypes)]);
+      setWeekly({ ...base, benchmarks, customTypes });
+    } catch (e) {
+      console.warn('Failed to copy previous week on reset', e);
+      setWeekly(base);
+    }
+  };
   const resetSession = () => setSession(defaultSession());
 
   return (
@@ -367,10 +390,11 @@ export default function WorkoutTrackerApp() {
         </header>
 
         <Tabs defaultValue="week" className="">
-          <TabsList className="grid grid-cols-3 w-full md:w-auto bg-white/80 backdrop-blur-sm border border-slate-200 shadow-sm">
+          <TabsList className="grid grid-cols-4 w-full md:w-auto bg-white/80 backdrop-blur-sm border border-slate-200 shadow-sm">
             <TabsTrigger value="week" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">Weekly Tracker</TabsTrigger>
             <TabsTrigger value="workout" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">Workout Session</TabsTrigger>
             <TabsTrigger value="history" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">History</TabsTrigger>
+            <TabsTrigger value="library" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">Library</TabsTrigger>
           </TabsList>
 
           <TabsContent value="week" className="mt-4">
@@ -383,6 +407,10 @@ export default function WorkoutTrackerApp() {
 
           <TabsContent value="history" className="mt-4">
             <HistoryView />
+          </TabsContent>
+
+          <TabsContent value="library" className="mt-4">
+            <LibraryView onLoadRoutine={(r) => setSession(r)} />
           </TabsContent>
         </Tabs>
       </div>
@@ -621,6 +649,16 @@ function WeeklyTracker({
               }
             } catch (e) { console.error('Copy previous week failed', e); alert('Failed to copy previous week'); }
           }}>Copy previous week</Button>
+          <Button variant="secondary" onClick={async () => {
+            const uid = auth.currentUser?.uid;
+            if (!uid) { alert('Sign in to save settings'); return; }
+            try {
+              await setDoc(doc(db, 'users', uid, 'state', weekly.weekOfISO), { weekly: { benchmarks: weekly.benchmarks, customTypes: weekly.customTypes } }, { merge: true });
+              alert('Weekly settings saved');
+            } catch (e) { console.error('Save settings failed', e); alert('Failed to save settings'); }
+          }} className="bg-white hover:bg-slate-50">
+            <Save className="mr-2 h-4 w-4" /> Save settings
+          </Button>
         </div>
       </CardHeader>
       {/* Weekly table */}
@@ -682,8 +720,8 @@ function WeeklyTracker({
                 <th className="sticky left-0 bg-white text-left p-2 border-b">Type</th>
                 {weekly.days.map((d) => (
                   <th key={d.dateISO} className="p-2 text-xs font-medium border-b">
-                    {new Date(d.dateISO).toLocaleDateString(undefined, { weekday: "short" })}
-                    <div className="text-[10px] text-neutral-500">{new Date(d.dateISO).getDate()}</div>
+                    {new Date(d.dateISO + 'T00:00').toLocaleDateString(undefined, { weekday: "short" })}
+                    <div className="text-[10px] text-neutral-500">{new Date(d.dateISO + 'T00:00').getDate()}</div>
                   </th>
                 ))}
                 <th className="p-2 text-left border-b">Total</th>
@@ -774,6 +812,9 @@ function WorkoutView({
 }) {
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerSec, setTimerSec] = useState<number>(session.durationSec || 0);
+  const [routines, setRoutines] = useState<any[]>([]);
+  const [showLoadModal, setShowLoadModal] = useState(false);
+  const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
 
   useEffect(() => {
     let id: any = null;
@@ -915,30 +956,16 @@ function WorkoutView({
   };
 
   const loadRoutines = async () => {
+    // show modal selection — load routines into local state for modal
     try {
       const uid = auth.currentUser?.uid;
-      if (!uid) {
-        alert('Please sign in to load routines');
-        return;
-      }
+      if (!uid) { alert('Please sign in to load routines'); return; }
       const ref = collection(db, 'users', uid, 'routines');
       const snaps = await getDocs(ref);
       const items = snaps.docs.map((s) => ({ id: s.id, ...(s.data() as any) }));
-      if (items.length === 0) {
-        alert('No routines saved');
-        return;
-      }
-      const names = items.map((it) => it.name).join('\n');
-      const pick = prompt('Available routines:\n' + names + '\n\nType the exact name to load');
-      if (!pick) return;
-      const found = items.find((it) => it.name === pick);
-      if (!found) {
-        alert('Routine not found');
-        return;
-      }
-      // Populate session with template (no sets/results)
-      const exercises = (found.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
-      setSession({ ...session, sessionName: found.name, exercises, completed: false, sessionTypes: found.sessionTypes || [] });
+      if (items.length === 0) { alert('No routines saved'); return; }
+      setRoutines(items);
+      setShowLoadModal(true);
     } catch (e) {
       console.error('Load routines failed', e);
       alert('Load failed');
@@ -1038,6 +1065,38 @@ function WorkoutView({
           </div>
         )}
       </div>
+      {/* Load routine modal */}
+      {showLoadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-2xl">
+            <h3 className="text-lg font-semibold mb-4">Load a routine</h3>
+            <div className="grid gap-2 max-h-72 overflow-y-auto">
+              {routines.map((r) => (
+                <div key={r.id} className={cn('p-3 rounded border', selectedRoutineId === r.id && 'bg-slate-50 border-slate-300')} onClick={() => setSelectedRoutineId(r.id)}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-medium">{r.name}</div>
+                      <div className="text-xs text-neutral-600">{(r.exercises || []).length} exercises</div>
+                    </div>
+                    <div className="text-sm text-neutral-600">{(r.sessionTypes || []).join(', ')}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => { setShowLoadModal(false); setSelectedRoutineId(null); }}>Cancel</Button>
+              <Button onClick={() => {
+                const found = routines.find((x) => x.id === selectedRoutineId);
+                if (!found) return alert('Select a routine');
+                const exercises = (found.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
+                setSession({ ...session, sessionName: found.name, exercises, completed: false, sessionTypes: found.sessionTypes || [], durationSec: 0 });
+                setShowLoadModal(false);
+                setSelectedRoutineId(null);
+              }}>Load selected</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1232,6 +1291,105 @@ function HistoryView() {
           </CardContent>
         </Card>
       ))}
+    </div>
+  );
+}
+
+function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession) => void }) {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<any | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+
+  const loadList = async () => {
+    setLoading(true);
+    try {
+      const uid = auth.currentUser?.uid;
+      if (!uid) { setItems([]); setLoading(false); return; }
+      const ref = collection(db, 'users', uid, 'routines');
+      const snaps = await getDocs(ref);
+      const data = snaps.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      setItems(data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+    } catch (e) {
+      console.error('Load routines list failed', e);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { loadList(); }, []);
+
+  if (loading) return <div>Loading routines...</div>;
+  if (items.length === 0) return <div className="text-sm text-neutral-600">No routines yet. Save a session to add one.</div>;
+
+  return (
+    <div className="space-y-3">
+      {items.map((it) => (
+        <Card key={it.id}>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-semibold">{it.name}</div>
+                <div className="text-xs text-neutral-600">{(it.exercises || []).length} exercises</div>
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={() => {
+                  const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
+                  onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0 });
+                }}>Load</Button>
+                <Button variant="outline" onClick={() => { setRenameTarget(it); setRenameValue(it.name); setShowRenameModal(true); }}>Rename</Button>
+                <Button variant="destructive" onClick={() => { setDeleteTarget(it); setShowDeleteModal(true); }}>Delete</Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-sm">{(it.sessionTypes || []).join(', ')}</div>
+          </CardContent>
+        </Card>
+      ))}
+      {/* Rename modal inside component */}
+      {showRenameModal && renameTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-2">Rename routine</h3>
+            <Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} />
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => { setShowRenameModal(false); setRenameTarget(null); }}>Cancel</Button>
+              <Button onClick={async () => {
+                if (!renameValue) return;
+                try {
+                  const uid = auth.currentUser?.uid; if (!uid) return alert('Sign in');
+                  await setDoc(doc(db, 'users', uid, 'routines', renameTarget.id), { name: renameValue }, { merge: true });
+                  setShowRenameModal(false);
+                  setRenameTarget(null);
+                  loadList();
+                } catch (e) { console.error('Rename failed', e); }
+              }}>Save</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete modal inside component */}
+      {showDeleteModal && deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-2">Delete routine</h3>
+            <p className="text-sm">Are you sure you want to delete <strong>{deleteTarget.name}</strong>?</p>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => { setShowDeleteModal(false); setDeleteTarget(null); }}>Cancel</Button>
+              <Button variant="destructive" onClick={async () => {
+                try {
+                  const uid = auth.currentUser?.uid; if (!uid) return alert('Sign in');
+                  await deleteDoc(doc(db, 'users', uid, 'routines', deleteTarget.id));
+                  setShowDeleteModal(false); setDeleteTarget(null); loadList();
+                } catch (e) { console.error('Delete failed', e); }
+              }}>Delete</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
