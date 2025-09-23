@@ -1,0 +1,66 @@
+{
+  "weekOfISO": "2025-09-22",
+  "customTypes": [
+    "Bike",
+    "Calves",
+    "Rings"
+  ],
+  "cleanedDays": [
+    {
+      "dateISO": "2025-09-22",
+      "types": {
+        "Bike": true
+      },
+      "sessions": 0,
+      "sessionsList": []
+    },
+    {
+      "dateISO": "2025-09-23",
+      "types": {},
+      "sessions": 0,
+      "sessionsList": []
+    },
+    {
+      "dateISO": "2025-09-24",
+      "types": {
+        "Rings": true,
+        "Calves": true
+      },
+      "sessions": 0,
+      "sessionsList": []
+    },
+    {
+      "dateISO": "2025-09-25",
+      "types": {},
+      "sessions": 0,
+      "sessionsList": []
+    },
+    {
+      "dateISO": "2025-09-26",
+      "types": {},
+      "sessions": 0,
+      "sessionsList": []
+    },
+    {
+      "dateISO": "2025-09-27",
+      "types": {},
+      "sessions": 0,
+      "sessionsList": []
+    },
+    {
+      "dateISO": "2025-09-28",
+      "types": {},
+      "sessions": 0,
+      "sessionsList": []
+    }
+  ],
+  "counts": {
+    "Bike": 1,
+    "Calves": 1,
+    "Rings": 1
+  },
+  "todayDone": 0,
+  "weekDone": 3,
+  "resistanceCount": 1,
+  "cardioCount": 1
+}

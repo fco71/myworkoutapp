@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, Trash2, Check, RefreshCw, Save, Bookmark } from "lucide-react";
+import { ToastContainer } from "@/components/ui/toast";
 
 // --- Types ---
 type WorkoutType = string; // flexible, user-defined types like 'Bike', 'Calves', 'Resistance', 'Cardio'
@@ -105,6 +106,17 @@ function defaultWeekly(): WeeklyPlan {
   customTypes: ["Bike", "Calves", "Rings"],
   typeCategories: { Bike: 'Cardio', Calves: 'None', Rings: 'Resistance' },
   };
+}
+
+// --- Toast helper (non-blocking feedback) ---
+function useToasts() {
+  const [messages, setMessages] = useState<{ id: string; text: string; kind?: 'info' | 'success' | 'error' }[]>([]);
+  const push = (text: string, kind?: 'info' | 'success' | 'error') => {
+    const id = crypto.randomUUID();
+    setMessages((s) => [...s, { id, text, kind }]);
+  };
+  const dismiss = (id: string) => setMessages((s) => s.filter((m) => m.id !== id));
+  return { messages, push, dismiss };
 }
 
 // --- localStorage helpers for global types ---
@@ -407,6 +419,8 @@ export default function WorkoutTrackerApp() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // top-level toasts container for non-blocking messages
+  const appToasts = useToasts();
 
   // Offline cache is configured at Firestore initialization in lib/firebase
 
@@ -439,7 +453,7 @@ export default function WorkoutTrackerApp() {
                     const snaps = await getDocs(collection(db, 'users', u.uid, 'sessions'));
                     const items = snaps.docs.map(s => ({ id: s.id, ...(s.data() as any) }));
                     console.debug('[WT] sessions collection loaded', safeString({ uid: u.uid, count: items.length, sample: items.slice(0,5) }));
-                    if (items.length > 0) {
+                      if (items.length > 0) {
                       // build map dateISO -> sessions
                       const dateMap: Record<string, any[]> = {};
                       normalized.days.forEach(d => { dateMap[d.dateISO] = []; });
@@ -464,12 +478,7 @@ export default function WorkoutTrackerApp() {
                       normalized = { ...normalized, days };
                       console.debug('[WT] Reconstructed sessionsList from sessions collection', safeString({ uid: u.uid, reconstructed: days.map(dd => ({ dateISO: dd.dateISO, sessions: dd.sessions, sessionsListLen: (dd.sessionsList||[]).length })) }));
                       // persist reconstructed weekly so subsequent loads use sessionsList
-                      try {
-                        await setDoc(doc(db, 'users', u.uid, 'state', normalized.weekOfISO), { weekly: normalized }, { merge: true });
-                        console.debug('[WT] persisted reconstructed weekly', safeString({ uid: u.uid, week: normalized.weekOfISO }));
-                      } catch (e) {
-                        console.warn('[WT] failed to persist reconstructed weekly', e);
-                      }
+                      // Persist reconstructed weekly removed per app decision (weekly doc is authoritative)
                     }
                   } catch (e) {
                     console.warn('[WT] Failed to reconstruct sessionsList from sessions collection', e);
@@ -607,6 +616,7 @@ export default function WorkoutTrackerApp() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 text-slate-900 p-6">
       <div className="mx-auto max-w-6xl">
+  <ToastContainer messages={appToasts.messages} onDismiss={appToasts.dismiss} />
         <header className="mb-8">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -644,8 +654,8 @@ export default function WorkoutTrackerApp() {
             <TabsTrigger value="library" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">Library</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="week" className="mt-4">
-            <WeeklyTracker weekly={weekly} setWeekly={setWeekly} onReset={resetWeek} />
+      <TabsContent value="week" className="mt-4">
+  <WeeklyTracker weekly={weekly} setWeekly={setWeekly} onReset={resetWeek} push={appToasts.push} />
           </TabsContent>
 
           <TabsContent value="workout" className="mt-4">
@@ -764,10 +774,12 @@ function WeeklyTracker({
   weekly,
   setWeekly,
   onReset,
+  push,
 }: {
   weekly: WeeklyPlan;
   setWeekly: (w: WeeklyPlan) => void;
   onReset: () => void;
+  push?: (text: string, kind?: 'info'|'success'|'error') => void;
 }) {
   const types = weekly.customTypes;
 
@@ -929,31 +941,31 @@ function WeeklyTracker({
           <Button variant="outline" onClick={async () => {
             // copy previous week from Firestore if signed in
             const uid = auth.currentUser?.uid;
-            if (!uid) { alert('Sign in to copy previous week'); return; }
+            if (!uid) { push?.('Sign in to copy previous week', 'info'); return; }
             const prevMonday = new Date(monday);
             prevMonday.setDate(monday.getDate() - 7);
             const prevISO = toISO(prevMonday);
             try {
               const ref = doc(db, 'users', uid, 'state', prevISO);
               const snap = await getDoc(ref);
-              if (!snap.exists()) { alert('No saved data for previous week'); return; }
+              if (!snap.exists()) { push?.('No saved data for previous week', 'info'); return; }
               const data = snap.data() as PersistedState;
               if (data?.weekly) {
                 setWeekly({ ...weekly, benchmarks: data.weekly.benchmarks, customTypes: data.weekly.customTypes });
                 saveGlobalTypes(data.weekly.customTypes || []);
                 // persist to current week doc
                 await setDoc(doc(db, 'users', uid, 'state', weekly.weekOfISO), { weekly: { ...weekly, benchmarks: data.weekly.benchmarks, customTypes: data.weekly.customTypes } }, { merge: true });
-                alert('Copied previous week settings');
+                push?.('Copied previous week settings', 'success');
               }
-            } catch (e) { console.error('Copy previous week failed', e); alert('Failed to copy previous week'); }
+            } catch (e) { console.error('Copy previous week failed', e); push?.('Failed to copy previous week', 'error'); }
           }}>Copy previous week</Button>
           <Button variant="secondary" onClick={async () => {
             const uid = auth.currentUser?.uid;
-            if (!uid) { alert('Sign in to save settings'); return; }
+            if (!uid) { push?.('Sign in to save settings', 'info'); return; }
             try {
               await setDoc(doc(db, 'users', uid, 'state', weekly.weekOfISO), { weekly: { benchmarks: weekly.benchmarks, customTypes: weekly.customTypes } }, { merge: true });
-              alert('Weekly settings saved');
-            } catch (e) { console.error('Save settings failed', e); alert('Failed to save settings'); }
+              push?.('Weekly settings saved', 'success');
+            } catch (e) { console.error('Save settings failed', e); push?.('Failed to save settings', 'error'); }
           }} className="bg-white hover:bg-slate-50">
             <Save className="mr-2 h-4 w-4" /> Save settings
           </Button>
@@ -1171,7 +1183,7 @@ function WeeklyTracker({
           </table>
         </div>
       </CardContent>
-    </Card>
+  </Card>
   );
 }
 
@@ -1189,6 +1201,7 @@ function WorkoutView({
   weekly: WeeklyPlan;
   setWeekly: (w: WeeklyPlan) => void;
 }) {
+  const toasts = useToasts();
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerSec, setTimerSec] = useState<number>(session.durationSec || 0);
   const [routines, setRoutines] = useState<any[]>([]);
@@ -1353,15 +1366,15 @@ function WorkoutView({
       if (!uid) {
         // save locally
         saveLocalRoutine(payload);
-        alert('Routine saved locally');
+  toasts.push('Routine saved locally', 'success');
         return;
       }
       const ref = collection(db, 'users', uid, 'routines');
       await addDoc(ref, payload as any);
-      alert('Routine saved');
+  toasts.push('Routine saved', 'success');
     } catch (e) {
       console.error('Save routine failed', e);
-      alert('Save failed');
+  toasts.push('Save failed', 'error');
     }
   };
 
@@ -1371,7 +1384,7 @@ function WorkoutView({
       const uid = auth.currentUser?.uid;
       if (!uid) {
         const items = loadLocalRoutines();
-        if (!items || items.length === 0) { alert('No local routines saved'); return; }
+  if (!items || items.length === 0) { toasts.push('No local routines saved', 'info'); return; }
         setRoutines(items);
         setShowLoadModal(true);
         return;
@@ -1379,12 +1392,12 @@ function WorkoutView({
       const ref = collection(db, 'users', uid, 'routines');
       const snaps = await getDocs(ref);
       const items = snaps.docs.map((s) => ({ id: s.id, ...(s.data() as any) }));
-      if (items.length === 0) { alert('No routines saved'); return; }
+  if (items.length === 0) { toasts.push('No routines saved', 'info'); return; }
       setRoutines(items);
       setShowLoadModal(true);
     } catch (e) {
       console.error('Load routines failed', e);
-      alert('Load failed');
+  toasts.push('Load failed', 'error');
     }
   };
 
@@ -1430,7 +1443,7 @@ function WorkoutView({
                 />
                   <Button variant="outline" onClick={async ()=>{
                     try {
-                      const uid = auth.currentUser?.uid; if (!uid) return alert('Sign in to favorite');
+                      const uid = auth.currentUser?.uid; if (!uid) return toasts.push('Sign in to favorite', 'info');
                       // determine template id (if any)
                       const itemId = session.sourceTemplateId;
                       const itemType = itemId ? 'routine' : null;
@@ -1438,8 +1451,8 @@ function WorkoutView({
                         const favId = `${itemType}::${itemId}`;
                         const favRef = doc(db, 'users', uid, 'favorites', favId);
                         const favSnap = await getDoc(favRef);
-                        if (favSnap.exists()) { await deleteDoc(favRef); alert('Removed favorite'); }
-                        else { await setDoc(favRef, { itemType, itemId, createdAt: Date.now() }); alert('Favorited'); }
+                        if (favSnap.exists()) { await deleteDoc(favRef); toasts.push('Removed favorite', 'success'); }
+                        else { await setDoc(favRef, { itemType, itemId, createdAt: Date.now() }); toasts.push('Favorited', 'success'); }
                         return;
                       }
                       // no template id: save current session as routine and favorite it
@@ -1448,8 +1461,8 @@ function WorkoutView({
                       const docRef = await addDoc(ref, payload as any);
                       const favId = `routine::${docRef.id}`;
                       await setDoc(doc(db, 'users', uid, 'favorites', favId), { itemType: 'routine', itemId: docRef.id, createdAt: Date.now() });
-                      alert('Saved routine and favorited');
-                    } catch (e) { console.error('Favorite current session failed', e); alert('Failed'); }
+                      toasts.push('Saved routine and favorited', 'success');
+                    } catch (e) { console.error('Favorite current session failed', e); toasts.push('Failed', 'error'); }
                   }} title="Favorite this session">
                     <Bookmark className="h-4 w-4" />
                   </Button>
@@ -1528,7 +1541,7 @@ function WorkoutView({
               <Button variant="outline" onClick={() => { setShowLoadModal(false); setSelectedRoutineId(null); }}>Cancel</Button>
               <Button onClick={() => {
                 const found = routines.find((x) => x.id === selectedRoutineId);
-                if (!found) return alert('Select a routine');
+                if (!found) return toasts.push('Select a routine', 'info');
                 const exercises = (found.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
                 setSession({ ...session, sessionName: found.name, exercises, completed: false, sessionTypes: found.sessionTypes || [], durationSec: 0 });
                 setShowLoadModal(false);
@@ -1681,6 +1694,7 @@ function ExerciseCard({
 }
 
 function HistoryView({ weekly, setWeekly }: { weekly: WeeklyPlan; setWeekly: (w: WeeklyPlan) => void }) {
+  const toasts = useToasts();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -1727,7 +1741,7 @@ function HistoryView({ weekly, setWeekly }: { weekly: WeeklyPlan; setWeekly: (w:
                 <Button variant="destructive" onClick={async () => {
                   if (!confirm('Delete this session?')) return;
                   try {
-                    const uid = auth.currentUser?.uid; if (!uid) return alert('Sign in to delete');
+                    const uid = auth.currentUser?.uid; if (!uid) return toasts.push('Sign in to delete', 'info');
                     await deleteDoc(doc(db, 'users', uid, 'sessions', it.id));
                     // remove from local weekly state
                     const days = weekly.days.map(d => ({ ...d, sessionsList: (d.sessionsList || []).filter(s => s.id !== it.id) }));
@@ -1737,7 +1751,7 @@ function HistoryView({ weekly, setWeekly }: { weekly: WeeklyPlan; setWeekly: (w:
                     setItems(prev => prev.filter(x => x.id !== it.id));
                   } catch (e) {
                     console.error('Delete session failed', e);
-                    alert('Delete failed - see console');
+                    toasts.push('Delete failed - see console', 'error');
                   }
                 }}>Delete</Button>
               </div>
@@ -1757,6 +1771,7 @@ function HistoryView({ weekly, setWeekly }: { weekly: WeeklyPlan; setWeekly: (w:
 function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, mode?: 'replace'|'append') => void }) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const toasts = useToasts();
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [renameTarget, setRenameTarget] = useState<any | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -1769,6 +1784,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
   const [composerKind, setComposerKind] = useState<'routine'|'exercise'>('routine');
   const [composerPublic, setComposerPublic] = useState(false);
   const [composerFavorite, setComposerFavorite] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all'|'exercise'|'workout'|'type'|'user'>('all');
   const [filterQuery, setFilterQuery] = useState('');
 
@@ -1778,14 +1794,14 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
 
   const saveComposerAsRoutine = async () => {
     try {
-  const uid = auth.currentUser?.uid;
-  const userName = auth.currentUser?.displayName || auth.currentUser?.email || uid || 'local';
-  if (composerKind === 'routine' && !composerName) return alert('Name the routine');
-  if (composerKind === 'exercise' && composerExercises.length === 0) return alert('Add at least one exercise');
-      if (!uid) {
-        alert('Sign in to save routines and exercises to the global library');
-        return;
-      } else {
+      setSaveMessage(null);
+      const uid = auth.currentUser?.uid;
+      const userName = auth.currentUser?.displayName || auth.currentUser?.email || uid || 'local';
+      if (composerKind === 'routine' && !composerName) { setSaveMessage('Name the routine'); return; }
+      if (composerKind === 'exercise' && composerExercises.length === 0) { setSaveMessage('Add at least one exercise'); return; }
+      if (!uid) { setSaveMessage('Sign in to save routines and exercises to the global library'); return; }
+      // Signed-in: persist to Firestore
+      
         // Signed-in: persist to Firestore
         if (composerKind === 'exercise') {
           const ref = collection(db, 'users', uid, 'exercises');
@@ -1802,35 +1818,55 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
               try { await setDoc(doc(db, 'users', uid, 'favorites', favId), { itemType: 'exercise', itemId: id, createdAt: Date.now() }); } catch (e) { console.warn('Failed to favorite created exercise', e); }
             }
           }
+          setSaveMessage('Saved exercise(s)');
         } else {
           const payload = { name: composerName, exercises: composerExercises.map(e => ({ name: e.name, minSets: e.minSets, targetReps: e.targetReps })), sessionTypes: [], createdAt: Date.now(), public: composerPublic, owner: uid, ownerName: userName };
           const ref = collection(db, 'users', uid, 'routines');
-          if (editingId) {
+            if (editingId) {
             await setDoc(doc(db, 'users', uid, 'routines', editingId), payload, { merge: true });
             // if favoriting an edited item, ensure favorite exists or is toggled
             if (composerFavorite) {
               const favId = `routine::${editingId}`;
               try { await setDoc(doc(db, 'users', uid, 'favorites', favId), { itemType: 'routine', itemId: editingId, createdAt: Date.now() }); } catch (e) { console.warn('Failed to favorite edited routine', e); }
             }
+              setSaveMessage('Updated routine');
           } else {
             const docRef = await addDoc(ref, payload as any);
             if (composerFavorite) {
               const favId = `routine::${docRef.id}`;
               try { await setDoc(doc(db, 'users', uid, 'favorites', favId), { itemType: 'routine', itemId: docRef.id, createdAt: Date.now() }); } catch (e) { console.warn('Failed to favorite created routine', e); }
             }
+              setSaveMessage('Saved routine');
           }
         }
-      }
       await loadList();
       resetComposer();
-    } catch (e) { console.error('Save composer failed', e); alert('Save failed'); }
+      setTimeout(() => setSaveMessage(null), 3000);
+  } catch (e) { console.error('Save composer failed', e); setSaveMessage('Save failed'); setTimeout(()=>setSaveMessage(null),3000); }
   };
 
   const loadList = async () => {
     setLoading(true);
     try {
       const uid = auth.currentUser?.uid;
-      if (!uid) { setItems([]); setLoading(false); return; }
+      if (!uid) {
+        // Not signed in: surface public items only so the library isn't empty
+        let data: any[] = [];
+        try {
+          if (filter === 'exercise') {
+            const cg = query(collectionGroup(db, 'exercises'), where('public', '==', true));
+            const publicSnaps = await getDocs(cg);
+            data = publicSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'exercise' }));
+          } else {
+            const cg = query(collectionGroup(db, 'routines'), where('public', '==', true));
+            const publicSnaps = await getDocs(cg);
+            data = publicSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
+          }
+        } catch (e) { console.warn('Failed to load public items', e); }
+        setItems(data.sort((a,b)=> (b.createdAt||0)-(a.createdAt||0)));
+        setLoading(false);
+        return;
+      }
       let data: any[] = [];
       if (filter === 'exercise') {
         // load exercises
@@ -1860,6 +1896,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
         }
       }
       // annotate with whether current user favorited each item (favorites stored per-user)
+      // annotate with whether current user favorited each item (only when signed in)
       try {
         const favSnaps = await getDocs(collection(db, 'users', uid, 'favorites'));
         const favs = favSnaps.docs.map(d => d.data() as any);
@@ -1908,6 +1945,9 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
         <CardContent>
           <div className="flex flex-col gap-2">
             <Input placeholder="Routine name" value={composerName} onChange={(e) => setComposerName(e.target.value)} />
+            {saveMessage && (
+              <div className="text-sm text-green-600 mt-2">{saveMessage}</div>
+            )}
             <div className="space-y-2">
               {composerExercises.map((ex, idx) => (
                 <div key={ex.id} className="flex gap-2 items-center">
@@ -1959,7 +1999,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
                 }} title="Append to current session">Append</Button>
                 <Button variant="outline" onClick={async ()=>{
                   try {
-                    const uid = auth.currentUser?.uid; if (!uid) return alert('Sign in');
+                    const uid = auth.currentUser?.uid; if (!uid) return toasts.push('Sign in', 'info');
                     const itemType = (it.kind||'routine');
                     const favId = `${itemType}::${it.id}`;
                     // optimistic UI: update local state
@@ -1997,7 +2037,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
               <Button onClick={async () => {
                 if (!renameValue) return;
                 try {
-                  const uid = auth.currentUser?.uid; if (!uid) return alert('Sign in');
+                  const uid = auth.currentUser?.uid; if (!uid) { setSaveMessage('Sign in'); setTimeout(()=>setSaveMessage(null),2000); return; }
                   await setDoc(doc(db, 'users', uid, 'routines', renameTarget.id), { name: renameValue }, { merge: true });
                   setShowRenameModal(false);
                   setRenameTarget(null);
@@ -2019,7 +2059,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
               <Button variant="outline" onClick={() => { setShowDeleteModal(false); setDeleteTarget(null); }}>Cancel</Button>
               <Button variant="destructive" onClick={async () => {
                 try {
-                  const uid = auth.currentUser?.uid; if (!uid) return alert('Sign in');
+                  const uid = auth.currentUser?.uid; if (!uid) { setSaveMessage('Sign in'); setTimeout(()=>setSaveMessage(null),2000); return; }
                   await deleteDoc(doc(db, 'users', uid, 'routines', deleteTarget.id));
                   setShowDeleteModal(false); setDeleteTarget(null); loadList();
                 } catch (e) { console.error('Delete failed', e); }
