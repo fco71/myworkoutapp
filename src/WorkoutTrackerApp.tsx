@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
-import { doc, getDoc, setDoc, collection, addDoc, getDocs, deleteDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, addDoc, getDocs, deleteDoc, query, where } from "firebase/firestore";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ type WeeklyDay = {
   dateISO: string; // yyyy-mm-dd
   types: Partial<Record<string, boolean>>; // did I do this type today?
   sessions?: number; // legacy/simple count of sessions completed that day
-  sessionsList?: { sessionTypes: WorkoutType[] }[]; // detailed sessions per day
+  sessionsList?: { id?: string; sessionTypes: WorkoutType[] }[]; // detailed sessions per day
 };
 
 type WeeklyPlan = {
@@ -67,6 +67,19 @@ function weekDates(monday: Date): Date[] {
 
 function cn(...classes: (string | false | undefined)[]) {
   return classes.filter(Boolean).join(" ");
+}
+
+// Safe stringify helper for debugging (handles circulars)
+function safeString(o: any, space = 2) {
+  try {
+    return JSON.stringify(o, (_, v) => (typeof v === 'bigint' ? String(v) : v), space);
+  } catch (e) {
+    try {
+      return String(o);
+    } catch {
+      return '<unstringifiable>';
+    }
+  }
 }
 
 // --- Persistence (Firebase Firestore) ---
@@ -157,6 +170,34 @@ function playBeep() {
   }
 }
 
+// Top-level helper to rebuild weekly sessionsList from sessions collection
+async function rebuildWeeklyFromSessions(uid: string, baseWeekly: WeeklyPlan, setWeeklyFn: (w: WeeklyPlan) => void) {
+  try {
+    const snaps = await getDocs(collection(db, 'users', uid, 'sessions'));
+    const items = snaps.docs.map(s => ({ id: s.id, ...(s.data() as any) }));
+    const dateMap: Record<string, any[]> = {};
+    baseWeekly.days.forEach(d => { dateMap[d.dateISO] = []; });
+    items.forEach(it => {
+      let d: string | null = null;
+      if (it.dateISO) d = it.dateISO;
+      else if (it.date) d = it.date;
+      else if (it.completedAt) d = toISO(new Date(it.completedAt));
+      else if (it.createdAt) d = toISO(new Date(it.createdAt));
+      else if (it.ts) d = toISO(new Date(it.ts));
+      if (!d && it.timestamp) d = toISO(new Date(it.timestamp));
+      if (d && dateMap[d]) dateMap[d].push(it);
+    });
+    const days = baseWeekly.days.map(d => ({ ...d, sessionsList: (dateMap[d.dateISO] || []).map(s => ({ id: s.id, sessionTypes: s.sessionTypes || [] })), sessions: (dateMap[d.dateISO] || []).length }));
+    const normalized = normalizeWeekly({ ...baseWeekly, days } as WeeklyPlan);
+    // persist to server so client loads authoritative data
+    await setDoc(doc(db, 'users', uid, 'state', normalized.weekOfISO), { weekly: normalized }, { merge: true });
+    setWeeklyFn(normalized);
+    console.debug('[WT] rebuilt weekly after session deletions', safeString({ uid, week: normalized.weekOfISO }));
+  } catch (e) {
+    console.warn('[WT] rebuildWeeklyFromSessions failed', e);
+  }
+}
+
 function saveGlobalTypes(types: string[]) {
   try {
     localStorage.setItem(LS_TYPES_KEY, JSON.stringify(types));
@@ -214,16 +255,31 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
     weekly.days.forEach((d) => {
       if (Array.isArray(d.sessionsList) && d.sessionsList.length > 0) {
         usedSessionsList = true;
+        // Count each session's declared types (per-session counts)
+        const typesSeenInSessions = new Set<string>();
         d.sessionsList.forEach((s) => {
           (s.sessionTypes || []).forEach((t) => {
+            typesSeenInSessions.add(t);
             if (!(t in c)) c[t] = 0;
             c[t] += 1;
           });
         });
+        // Also consider any checkbox types for the day that are not represented
+        // in the session documents. This handles cases where a manual session
+        // doc exists but lacks sessionTypes (or was created empty) — we want
+        // the user's recent clicks to still show up in the header.
+        Object.keys(d.types || {}).forEach((t) => {
+          if (d.types[t]) {
+            if (!typesSeenInSessions.has(t)) {
+              if (!(t in c)) c[t] = 0;
+              c[t] += 1; // treat the checkbox as one session for this type
+            }
+          }
+        });
       }
     });
     if (!usedSessionsList) {
-      // fallback to counting type checkboxes
+      // fallback to counting type checkboxes; treat Bike as Cardio as well
       weekly.days.forEach((d) => {
         Object.keys(d.types).forEach((t) => {
           if (d.types[t]) {
@@ -231,24 +287,51 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
             c[t] += 1;
           }
         });
+        // if Bike is checked but Cardio isn't, count it as Cardio
+        if (d.types['Bike']) {
+          if (!('Cardio' in c)) c['Cardio'] = 0;
+          if (!d.types['Cardio']) c['Cardio'] += 1;
+        }
       });
     }
-    console.debug('[WT] WeeklyOverview counts computed', { counts: c, usedSessionsList, days: weekly.days.map(d => ({ dateISO: d.dateISO, types: d.types, sessions: d.sessions, sessionsList: d.sessionsList })) });
+  console.debug('[WT] WeeklyOverview counts computed', safeString({ counts: c, usedSessionsList, days: weekly.days.map(d => ({ dateISO: d.dateISO, types: d.types, sessions: d.sessions, sessionsList: d.sessionsList })) }));
     return c;
   }, [weekly.days, weekly.customTypes]);
 
   // Use sessionsList as authoritative source for distinct sessions
+  // Total today should reflect actual persisted sessions (sessionsList) or legacy sessions count.
+  // Do NOT treat checked types as sessions here — that was causing inflated totals.
   const totalToday = todayData
     ? (Array.isArray(todayData.sessionsList) && todayData.sessionsList.length > 0
         ? todayData.sessionsList.length
-        : (typeof todayData.sessions === 'number' && todayData.sessions > 0 ? todayData.sessions : Object.values(todayData.types).filter(Boolean).length))
+        : (typeof todayData.sessions === 'number' && todayData.sessions > 0 ? todayData.sessions : 0))
     : 0;
 
-  const weekProgress = weekly.days.reduce((sum, d) => {
-    if (Array.isArray(d.sessionsList) && d.sessionsList.length > 0) return sum + d.sessionsList.length;
-    if (typeof d.sessions === 'number' && d.sessions > 0) return sum + d.sessions;
-    return sum + Object.values(d.types || {}).filter(Boolean).length;
-  }, 0);
+  // Compute week progress as a simple sum of per-day session counts.
+  // Per-day session count priority:
+  // 1) sessionsList.length (authoritative)
+  // 2) legacy sessions number
+  // 3) if any type checkbox is set -> count as 1
+  const perDayCounts = weekly.days.map((d) => {
+    if (Array.isArray(d.sessionsList) && d.sessionsList.length > 0) return d.sessionsList.length;
+    if (typeof d.sessions === 'number' && d.sessions > 0) return d.sessions;
+    const hasAnyType = Object.values(d.types || {}).some(Boolean);
+    return hasAnyType ? 1 : 0;
+  });
+  const weekProgress = perDayCounts.reduce((a, b) => a + b, 0);
+
+  // debug: compute unique session ids across the week and show per-day details
+    try {
+    const allIds: string[] = [];
+    weekly.days.forEach((d) => {
+      (d.sessionsList || []).forEach((s: any) => { if (s?.id) allIds.push(String(s.id)); else allIds.push(JSON.stringify(s.sessionTypes || s)); });
+    });
+    const uniqueIds = Array.from(new Set(allIds));
+    const perDay = weekly.days.map(d => ({ dateISO: d.dateISO, sessionsList: (d.sessionsList || []).map((s:any)=> ({ id: s?.id, sessionTypes: s.sessionTypes })) , sessions: d.sessions }));
+    console.debug('[WT] Week summary', safeString({ weekOfISO: weekly.weekOfISO, weekProgress, uniqueSessionCount: uniqueIds.length, uniqueIds, perDay, counts }));
+  } catch (e) {
+    console.warn('[WT] Week summary debug failed', safeString(e));
+  }
 
   return (
     <div className="space-y-4 mb-8">
@@ -370,27 +453,42 @@ export default function WorkoutTrackerApp() {
                 // dedupe types and normalize
                 const uniq = ensureUniqueTypes(data.weekly.customTypes || []);
                   let normalized = normalizeWeekly({ ...data.weekly, customTypes: uniq } as WeeklyPlan);
-                  console.debug('[WT] Loaded per-week state (raw)', { uid: u.uid, week: toISO(getMonday()), normalized });
-                  // If sessionsList is empty in the weekly doc, try to reconstruct from users/{uid}/sessions collection
+                  console.debug('[WT] Loaded per-week state (raw)', safeString({ uid: u.uid, week: toISO(getMonday()), normalized }));
+                  // Always attempt to reconstruct sessionsList from users/{uid}/sessions collection
                   try {
                     const snaps = await getDocs(collection(db, 'users', u.uid, 'sessions'));
                     const items = snaps.docs.map(s => ({ id: s.id, ...(s.data() as any) }));
+                    console.debug('[WT] sessions collection loaded', safeString({ uid: u.uid, count: items.length, sample: items.slice(0,5) }));
                     if (items.length > 0) {
                       // build map dateISO -> sessions
                       const dateMap: Record<string, any[]> = {};
                       normalized.days.forEach(d => { dateMap[d.dateISO] = []; });
                       items.forEach(it => {
-                        const d = it.dateISO || toISO(new Date(it.completedAt || Date.now()));
+                        // try multiple fields for a date
+                        let d: string | null = null;
+                        if (it.dateISO) d = it.dateISO;
+                        else if (it.date) d = it.date;
+                        else if (it.completedAt) d = toISO(new Date(it.completedAt));
+                        else if (it.createdAt) d = toISO(new Date(it.createdAt));
+                        else if (it.ts) d = toISO(new Date(it.ts));
+                        // fallback: if no date fields, try parsing payload
+                        if (!d && it.timestamp) d = toISO(new Date(it.timestamp));
+                        if (!d) {
+                          try { d = toISO(new Date(it)); } catch { d = null; }
+                        }
                         if (d && dateMap[d]) {
                           dateMap[d].push(it);
                         }
                       });
-                      // merge only if weekly had no sessionsList data
-                      const hadSessions = normalized.days.some(d => Array.isArray(d.sessionsList) && d.sessionsList.length > 0);
-                      if (!hadSessions) {
-                        const days = normalized.days.map(d => ({ ...d, sessionsList: (dateMap[d.dateISO] || []).map(s => ({ sessionTypes: s.sessionTypes || [] })), sessions: (dateMap[d.dateISO] || []).length }));
-                        normalized = { ...normalized, days };
-                        console.debug('[WT] Reconstructed sessionsList from sessions collection', { uid: u.uid, reconstructed: days.map(dd => ({ dateISO: dd.dateISO, sessions: dd.sessions, sessionsListLen: (dd.sessionsList||[]).length })) });
+                      const days = normalized.days.map(d => ({ ...d, sessionsList: (dateMap[d.dateISO] || []).map(s => ({ id: s.id, sessionTypes: s.sessionTypes || [] })), sessions: (dateMap[d.dateISO] || []).length }));
+                      normalized = { ...normalized, days };
+                      console.debug('[WT] Reconstructed sessionsList from sessions collection', safeString({ uid: u.uid, reconstructed: days.map(dd => ({ dateISO: dd.dateISO, sessions: dd.sessions, sessionsListLen: (dd.sessionsList||[]).length })) }));
+                      // persist reconstructed weekly so subsequent loads use sessionsList
+                      try {
+                        await setDoc(doc(db, 'users', u.uid, 'state', normalized.weekOfISO), { weekly: normalized }, { merge: true });
+                        console.debug('[WT] persisted reconstructed weekly', safeString({ uid: u.uid, week: normalized.weekOfISO }));
+                      } catch (e) {
+                        console.warn('[WT] failed to persist reconstructed weekly', e);
                       }
                     }
                   } catch (e) {
@@ -424,7 +522,7 @@ export default function WorkoutTrackerApp() {
               const t = sSnap.data()?.types;
               if (Array.isArray(t) && t.length > 0) {
                   const custom = ensureUniqueTypes(t);
-                  console.debug('[WT] Loaded global types from settings', { uid: u.uid, custom });
+                  console.debug('[WT] Loaded global types from settings', safeString({ uid: u.uid, custom }));
                   setWeekly((prev) => normalizeWeekly({ ...prev, customTypes: custom } as WeeklyPlan));
               }
             }
@@ -458,6 +556,8 @@ export default function WorkoutTrackerApp() {
       console.warn('Autosave failed', e);
     }
   }, [userId, weekly, session]);
+
+  // ...existing code...
 
   // Global floating countdown timer
   const [countdownSec, setCountdownSec] = useState<number>(0);
@@ -559,7 +659,7 @@ export default function WorkoutTrackerApp() {
           </TabsContent>
 
           <TabsContent value="history" className="mt-4">
-            <HistoryView />
+            <HistoryView weekly={weekly} setWeekly={setWeekly} />
           </TabsContent>
 
           <TabsContent value="library" className="mt-4">
@@ -686,6 +786,11 @@ function WeeklyTracker({
     if (!usedSessionsList) {
       weekly.days.forEach((d) => {
         types.forEach((t) => { if (d.types[t]) c[t] += 1; });
+        // Bike implies Cardio for totals when Cardio not explicitly checked
+        if (d.types['Bike']) {
+          if (!('Cardio' in c)) c['Cardio'] = 0;
+          if (!d.types['Cardio']) c['Cardio'] += 1;
+        }
       });
     }
     return c;
@@ -869,7 +974,7 @@ function WeeklyTracker({
               const newWeekly = normalizeWeekly({ ...weekly, days } as WeeklyPlan);
               await setDoc(doc(db, 'users', uid, 'state', weekly.weekOfISO), { weekly: newWeekly }, { merge: true });
               setWeekly(newWeekly);
-              console.debug('[WT] Rebuilt weekly from sessions and saved', { week: weekly.weekOfISO, days: days.map(dd => ({ dateISO: dd.dateISO, sessions: dd.sessions })) });
+          console.debug('[WT] Rebuilt weekly from sessions and saved', safeString({ week: weekly.weekOfISO, days: days.map(dd => ({ dateISO: dd.dateISO, sessions: dd.sessions })) }));
               alert('Rebuilt weekly from sessions and saved');
             } catch (e) { console.error('Rebuild failed', e); alert('Rebuild failed - see console'); }
           }}>Rebuild from sessions</Button>
@@ -936,6 +1041,9 @@ function WeeklyTracker({
                   <th key={d.dateISO} className="p-2 text-xs font-medium border-b">
                     {new Date(d.dateISO + 'T00:00').toLocaleDateString(undefined, { weekday: "short" })}
                     <div className="text-[10px] text-neutral-500">{new Date(d.dateISO + 'T00:00').getDate()}</div>
+                    <div className="text-[10px] mt-1">
+                      <span className="inline-block bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-[10px]">{(d.sessionsList||[]).length} sessions</span>
+                    </div>
                   </th>
                 ))}
                 <th className="p-2 text-left border-b">Total</th>
@@ -957,7 +1065,7 @@ function WeeklyTracker({
                             "p-2 text-center align-middle border-b cursor-pointer",
                             active && "bg-green-100/70"
                           )}
-                          onClick={() => {
+                          onClick={async () => {
                               const days = [...weekly.days];
                               const day = { ...days[idx] };
                               const newTypes = { ...day.types, [t]: !active } as Record<string, boolean>;
@@ -965,10 +1073,65 @@ function WeeklyTracker({
                               if (t === 'Bike' && !active) newTypes['Cardio'] = true;
                               // If Cardio turned off while Bike is on, keep Cardio if Bike is true
                               if (t === 'Cardio' && !newTypes['Cardio'] && newTypes['Bike']) newTypes['Cardio'] = true;
-                              console.debug('[WT] toggleType cell', { type: t, dateISO: days[idx].dateISO, before: day.types, after: newTypes, idx });
+                              console.debug('[WT] toggleType cell', safeString({ type: t, dateISO: days[idx].dateISO, before: day.types, after: newTypes, idx }));
                               day.types = newTypes;
+
+                              // If there are no real session docs for the day, create or remove a manual session doc so DB stays authoritative
+                              const uid = auth.currentUser?.uid;
+                              const oldList = Array.isArray(day.sessionsList) ? day.sessionsList.slice() : [];
+                              const realExists = oldList.some(s => s?.id && !String(s.id).startsWith('manual:'));
+                              const hasAny = Object.values(newTypes).some(Boolean);
+                              if (!realExists && uid) {
+                                try {
+                                  if (hasAny) {
+                                    // create or update a manual session doc (await to avoid races)
+                                    const existingManual = oldList.find(s => s?.id && String(s.id).startsWith('manual:')) as any;
+                                    if (!existingManual) {
+                                      const payload = { sessionName: 'Manual', sessionTypes: Object.keys(newTypes).filter(k => newTypes[k]), exercises: [], completedAt: Date.now(), dateISO: day.dateISO };
+                                      const r = await addDoc(collection(db, 'users', uid, 'sessions'), payload as any);
+                                      // use server id returned from addDoc
+                                      day.sessionsList = [{ id: r.id, sessionTypes: payload.sessionTypes }];
+                                    } else {
+                                      // update manual doc on server and use the same id
+                                      const ref = doc(db, 'users', uid, 'sessions', existingManual.id);
+                                      const updatedTypes = Object.keys(newTypes).filter(k => newTypes[k]);
+                                      await setDoc(ref, { sessionTypes: updatedTypes }, { merge: true });
+                                      day.sessionsList = [{ id: existingManual.id, sessionTypes: updatedTypes }];
+                                    }
+                                  } else {
+                                    // remove manual session docs for that date if any
+                                    try {
+                                      const q = query(collection(db, 'users', uid, 'sessions'), where('dateISO', '==', day.dateISO), where('sessionName', '==', 'Manual'));
+                                      const snapsToDelete = await getDocs(q);
+                                      for (const sdoc of snapsToDelete.docs) {
+                                        try { await deleteDoc(doc(db, 'users', uid, 'sessions', sdoc.id)); } catch (e) { /* ignore per-doc failures */ }
+                                      }
+                                    } catch (e) {
+                                      console.warn('[WT] failed to delete server manual sessions', e);
+                                    }
+                                    // remove any local manual ids from the sessionsList reference
+                                    day.sessionsList = [];
+                                  }
+                                } catch (e) {
+                                  console.warn('[WT] toggle persistence failed', e);
+                                }
+                              } else {
+                                // local only fallback
+                                if (!hasAny) day.sessionsList = [];
+                                else day.sessionsList = [{ id: `manual:${crypto.randomUUID()}`, sessionTypes: Object.keys(newTypes).filter(k => newTypes[k]) }];
+                              }
+
+                              day.sessions = (day.sessionsList || []).length;
                               days[idx] = day;
-                              setWeekly({ ...weekly, days });
+                              const newWeekly = { ...weekly, days } as WeeklyPlan;
+                              // update local UI immediately
+                              setWeekly(newWeekly);
+                              // persist weekly settings (ensure we persist the fresh newWeekly)
+                              try { if (uid) await setDoc(doc(db, 'users', uid, 'state', newWeekly.weekOfISO), { weekly: newWeekly }, { merge: true }); } catch (e) { console.warn('[WT] failed to persist weekly after toggle', e); }
+                              // If we removed manual sessions, rebuild authoritative weekly from sessions collection
+                              if (!hasAny && uid) {
+                                try { await rebuildWeeklyFromSessions(uid, newWeekly, setWeekly); } catch (e) { /* ignore */ }
+                              }
                             }}
                         >
                           {active ? <Check className="inline h-4 w-4" /> : ""}
@@ -1115,7 +1278,7 @@ function WorkoutView({
     });
   };
 
-  const completeWorkout = () => {
+  const completeWorkout = async () => {
     // Prevent double-processing for the same session object
     if (completedGuards.has(session)) {
       console.warn('[WT] completeWorkout called but session already processed', { sessionName: session.sessionName, dateISO: session.dateISO });
@@ -1123,54 +1286,53 @@ function WorkoutView({
     }
     completedGuards.add(session);
 
-    // Mark session as completed
+    // Mark session as completed in local state
     setSession({ ...session, completed: true, durationSec: timerSec });
-    
-    // Auto-populate weekly tracker
+
     const today = session.dateISO;
-    const todayIndex = weekly.days.findIndex(d => d.dateISO === today);
-    console.debug('[WT] completeWorkout called', { sessionDate: today, todayIndex, sessionTypes: session.sessionTypes, weeklyDays: weekly.days.map(d => d.dateISO) });
-    if (todayIndex !== -1) {
-      const updatedDays = [...weekly.days];
-      const markTypes: string[] = [...session.sessionTypes];
-      // if Bike is present, also mark Cardio implicitly
-      if (markTypes.includes("Bike") && !markTypes.includes("Cardio")) markTypes.push("Cardio");
-      const newTypes = { ...updatedDays[todayIndex].types } as Record<string, boolean>;
-      markTypes.forEach((t) => { newTypes[t] = true; });
-      const before = { ...updatedDays[todayIndex].types, sessions: updatedDays[todayIndex].sessions };
-      // push a session record into sessionsList (authoritative list of sessions)
-      const oldList = Array.isArray(updatedDays[todayIndex].sessionsList) ? updatedDays[todayIndex].sessionsList.slice() : [];
-      oldList.push({ sessionTypes: markTypes });
-      const after = { ...newTypes, sessions: oldList.length };
-      console.debug('[WT] Updating day types and sessionsList', { dateISO: updatedDays[todayIndex].dateISO, before, after, markTypes, sessionsListBefore: updatedDays[todayIndex].sessionsList });
-      updatedDays[todayIndex] = { ...updatedDays[todayIndex], types: newTypes, sessions: after.sessions, sessionsList: oldList };
-      const newWeekly = { ...weekly, days: updatedDays } as WeeklyPlan;
-      setWeekly(newWeekly);
-      // Persist weekly immediately so sessionsList is saved server-side
-      (async () => {
-        try {
-          const uid = auth.currentUser?.uid;
-          if (!uid) return;
-          await setDoc(doc(db, 'users', uid, 'state', newWeekly.weekOfISO), { weekly: newWeekly }, { merge: true });
-          console.debug('[WT] persisted weekly after completeWorkout', { uid, week: newWeekly.weekOfISO });
-        } catch (e) {
-          console.error('[WT] failed to persist weekly after completeWorkout', e);
-        }
-      })();
-    } else {
-      console.warn('[WT] completeWorkout: todayIndex not found in weekly.days', { today, weeklyDays: weekly.days.map(d => d.dateISO) });
-    }
-    // persist completed session to Firestore under users/{uid}/sessions
-    (async () => {
-      try {
-        const uid = auth.currentUser?.uid;
-        if (!uid) return;
+    const todayIndex = weekly.days.findIndex((d) => d.dateISO === today);
+    console.debug('[WT] completeWorkout called', safeString({ sessionDate: today, todayIndex, sessionTypes: session.sessionTypes, weeklyDays: weekly.days.map((d) => d.dateISO) }));
+
+    // Persist completed session to Firestore first so we get a document id
+    try {
+      const uid = auth.currentUser?.uid;
+      if (!uid) {
+        console.warn('[WT] completeWorkout: no user id, cannot persist session');
+      } else {
         const payload = { ...session, durationSec: timerSec, completedAt: Date.now() };
-        await addDoc(collection(db, 'users', uid, 'sessions'), payload as any);
-      } catch (e) {
-        console.error('Failed to save completed session', e);
+        const docRef = await addDoc(collection(db, 'users', uid, 'sessions'), payload as any);
+        const sessionId = docRef.id;
+
+        if (todayIndex !== -1) {
+          const updatedDays = [...weekly.days];
+          const markTypes: string[] = [...session.sessionTypes];
+          // if Bike is present, also mark Cardio implicitly
+          if (markTypes.includes('Bike') && !markTypes.includes('Cardio')) markTypes.push('Cardio');
+          const newTypes = { ...updatedDays[todayIndex].types } as Record<string, boolean>;
+          markTypes.forEach((t) => { newTypes[t] = true; });
+          const before = { ...updatedDays[todayIndex].types, sessions: updatedDays[todayIndex].sessions };
+          // push a session record (with id) into sessionsList (authoritative list of sessions)
+          const oldList = Array.isArray(updatedDays[todayIndex].sessionsList) ? updatedDays[todayIndex].sessionsList.slice() : [];
+          oldList.push({ id: sessionId, sessionTypes: markTypes });
+          const after = { ...newTypes, sessions: oldList.length };
+          console.debug('[WT] Updating day types and sessionsList', safeString({ dateISO: updatedDays[todayIndex].dateISO, before, after, markTypes, sessionsListBefore: updatedDays[todayIndex].sessionsList }));
+          updatedDays[todayIndex] = { ...updatedDays[todayIndex], types: newTypes, sessions: after.sessions, sessionsList: oldList };
+          const newWeekly = { ...weekly, days: updatedDays } as WeeklyPlan;
+          setWeekly(newWeekly);
+          // Persist weekly immediately so sessionsList is saved server-side
+          try {
+            await setDoc(doc(db, 'users', uid, 'state', newWeekly.weekOfISO), { weekly: newWeekly }, { merge: true });
+            console.debug('[WT] persisted weekly after completeWorkout', safeString({ uid, week: newWeekly.weekOfISO }));
+          } catch (e) {
+            console.error('[WT] failed to persist weekly after completeWorkout', e);
+          }
+        } else {
+          console.warn('[WT] completeWorkout: todayIndex not found in weekly.days', { today, weeklyDays: weekly.days.map((d) => d.dateISO) });
+        }
       }
-    })();
+    } catch (e) {
+      console.error('Failed to save completed session', e);
+    }
     // stop the timer when completed
     setTimerRunning(false);
     // leave the guard true to prevent re-entry
@@ -1492,7 +1654,7 @@ function ExerciseCard({
   );
 }
 
-function HistoryView() {
+function HistoryView({ weekly, setWeekly }: { weekly: WeeklyPlan; setWeekly: (w: WeeklyPlan) => void }) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -1534,7 +1696,25 @@ function HistoryView() {
                 <div className="font-semibold">{it.sessionName}</div>
                 <div className="text-xs text-neutral-600">{new Date((it.completedAt || it.ts || Date.now()) ).toLocaleString()}</div>
               </div>
-              <div className="text-sm text-neutral-600">{(it.exercises || []).length} exercises</div>
+              <div className="flex items-center gap-2">
+                <div className="text-sm text-neutral-600">{(it.exercises || []).length} exercises</div>
+                <Button variant="destructive" onClick={async () => {
+                  if (!confirm('Delete this session?')) return;
+                  try {
+                    const uid = auth.currentUser?.uid; if (!uid) return alert('Sign in to delete');
+                    await deleteDoc(doc(db, 'users', uid, 'sessions', it.id));
+                    // remove from local weekly state
+                    const days = weekly.days.map(d => ({ ...d, sessionsList: (d.sessionsList || []).filter(s => s.id !== it.id) }));
+                    const newWeekly = normalizeWeekly({ ...weekly, days } as WeeklyPlan);
+                    setWeekly(newWeekly);
+                    // remove from history list
+                    setItems(prev => prev.filter(x => x.id !== it.id));
+                  } catch (e) {
+                    console.error('Delete session failed', e);
+                    alert('Delete failed - see console');
+                  }
+                }}>Delete</Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
