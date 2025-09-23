@@ -1,12 +1,12 @@
 import { useMemo, useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
-import { doc, getDoc, setDoc, collection, addDoc, getDocs, deleteDoc, query, where } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, addDoc, getDocs, deleteDoc, query, where, collectionGroup } from "firebase/firestore";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, Check, RefreshCw, Save } from "lucide-react";
+import { Plus, Trash2, Check, RefreshCw, Save, Bookmark } from "lucide-react";
 
 // --- Types ---
 type WorkoutType = string; // flexible, user-defined types like 'Bike', 'Calves', 'Resistance', 'Cardio'
@@ -42,6 +42,7 @@ type ResistanceSession = {
   completed: boolean;
   sessionTypes: WorkoutType[];
   durationSec?: number;
+  sourceTemplateId?: string; // optional id of originating library routine/exercise
 };
 
 // --- Utilities ---
@@ -238,6 +239,8 @@ function saveLocalRoutine(item: any) {
     localStorage.setItem(LS_ROUTINES, JSON.stringify(cur.slice(0, 100)));
   } catch (e) { console.warn('Failed to save local routine', e); }
 }
+
+// no local exercises -- exercises are a database feature (persisted in Firestore)
 
 // --- Weekly Overview Component ---
 function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
@@ -654,7 +657,13 @@ export default function WorkoutTrackerApp() {
           </TabsContent>
 
           <TabsContent value="library" className="mt-4">
-            <LibraryView onLoadRoutine={(r) => setSession(r)} />
+            <LibraryView onLoadRoutine={(r, mode) => {
+              if (mode === 'append') {
+                setSession((prev) => ({ ...prev, exercises: [...prev.exercises, ...(r.exercises || [])] } as ResistanceSession));
+              } else {
+                setSession(r);
+              }
+            }} />
           </TabsContent>
         </Tabs>
       </div>
@@ -1419,6 +1428,31 @@ function WorkoutView({
                   onChange={(e) => setSession({ ...session, dateISO: e.target.value })}
                   className="w-auto"
                 />
+                  <Button variant="outline" onClick={async ()=>{
+                    try {
+                      const uid = auth.currentUser?.uid; if (!uid) return alert('Sign in to favorite');
+                      // determine template id (if any)
+                      const itemId = session.sourceTemplateId;
+                      const itemType = itemId ? 'routine' : null;
+                      if (itemId) {
+                        const favId = `${itemType}::${itemId}`;
+                        const favRef = doc(db, 'users', uid, 'favorites', favId);
+                        const favSnap = await getDoc(favRef);
+                        if (favSnap.exists()) { await deleteDoc(favRef); alert('Removed favorite'); }
+                        else { await setDoc(favRef, { itemType, itemId, createdAt: Date.now() }); alert('Favorited'); }
+                        return;
+                      }
+                      // no template id: save current session as routine and favorite it
+                      const payload = { name: session.sessionName || 'Routine', exercises: session.exercises.map(e=>({ name: e.name, minSets: e.minSets, targetReps: e.targetReps })), sessionTypes: session.sessionTypes || [], createdAt: Date.now(), public: false, owner: uid, ownerName: auth.currentUser?.displayName || auth.currentUser?.email || uid };
+                      const ref = collection(db, 'users', uid, 'routines');
+                      const docRef = await addDoc(ref, payload as any);
+                      const favId = `routine::${docRef.id}`;
+                      await setDoc(doc(db, 'users', uid, 'favorites', favId), { itemType: 'routine', itemId: docRef.id, createdAt: Date.now() });
+                      alert('Saved routine and favorited');
+                    } catch (e) { console.error('Favorite current session failed', e); alert('Failed'); }
+                  }} title="Favorite this session">
+                    <Bookmark className="h-4 w-4" />
+                  </Button>
               </div>
             </div>
           </CardHeader>
@@ -1720,7 +1754,7 @@ function HistoryView({ weekly, setWeekly }: { weekly: WeeklyPlan; setWeekly: (w:
   );
 }
 
-function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession) => void }) {
+function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, mode?: 'replace'|'append') => void }) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showRenameModal, setShowRenameModal] = useState(false);
@@ -1732,6 +1766,11 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession) 
   const [composerName, setComposerName] = useState('');
   const [composerExercises, setComposerExercises] = useState<ResistanceExercise[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [composerKind, setComposerKind] = useState<'routine'|'exercise'>('routine');
+  const [composerPublic, setComposerPublic] = useState(false);
+  const [composerFavorite, setComposerFavorite] = useState(false);
+  const [filter, setFilter] = useState<'all'|'exercise'|'workout'|'type'|'user'>('all');
+  const [filterQuery, setFilterQuery] = useState('');
 
   const resetComposer = () => { setComposerName(''); setComposerExercises([]); setEditingId(null); };
 
@@ -1739,14 +1778,48 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession) 
 
   const saveComposerAsRoutine = async () => {
     try {
-      const uid = auth.currentUser?.uid; if (!uid) return alert('Sign in to save');
-      if (!composerName) return alert('Name the routine');
-      const payload = { name: composerName, exercises: composerExercises.map(e => ({ name: e.name, minSets: e.minSets, targetReps: e.targetReps })), sessionTypes: [], createdAt: Date.now() };
-      const ref = collection(db, 'users', uid, 'routines');
-      if (editingId) {
-        await setDoc(doc(db, 'users', uid, 'routines', editingId), payload, { merge: true });
+  const uid = auth.currentUser?.uid;
+  const userName = auth.currentUser?.displayName || auth.currentUser?.email || uid || 'local';
+  if (composerKind === 'routine' && !composerName) return alert('Name the routine');
+  if (composerKind === 'exercise' && composerExercises.length === 0) return alert('Add at least one exercise');
+      if (!uid) {
+        alert('Sign in to save routines and exercises to the global library');
+        return;
       } else {
-        await addDoc(ref, payload as any);
+        // Signed-in: persist to Firestore
+        if (composerKind === 'exercise') {
+          const ref = collection(db, 'users', uid, 'exercises');
+          const createdIds: string[] = [];
+          for (const ex of composerExercises) {
+            const payload = { name: ex.name, minSets: ex.minSets, targetReps: ex.targetReps, createdAt: Date.now(), public: composerPublic, owner: uid, ownerName: userName };
+            const docRef = await addDoc(ref, payload as any);
+            createdIds.push(docRef.id);
+          }
+          // If user checked Favorite, add per-user favorites for each created exercise
+          if (composerFavorite && createdIds.length > 0) {
+            for (const id of createdIds) {
+              const favId = `exercise::${id}`;
+              try { await setDoc(doc(db, 'users', uid, 'favorites', favId), { itemType: 'exercise', itemId: id, createdAt: Date.now() }); } catch (e) { console.warn('Failed to favorite created exercise', e); }
+            }
+          }
+        } else {
+          const payload = { name: composerName, exercises: composerExercises.map(e => ({ name: e.name, minSets: e.minSets, targetReps: e.targetReps })), sessionTypes: [], createdAt: Date.now(), public: composerPublic, owner: uid, ownerName: userName };
+          const ref = collection(db, 'users', uid, 'routines');
+          if (editingId) {
+            await setDoc(doc(db, 'users', uid, 'routines', editingId), payload, { merge: true });
+            // if favoriting an edited item, ensure favorite exists or is toggled
+            if (composerFavorite) {
+              const favId = `routine::${editingId}`;
+              try { await setDoc(doc(db, 'users', uid, 'favorites', favId), { itemType: 'routine', itemId: editingId, createdAt: Date.now() }); } catch (e) { console.warn('Failed to favorite edited routine', e); }
+            }
+          } else {
+            const docRef = await addDoc(ref, payload as any);
+            if (composerFavorite) {
+              const favId = `routine::${docRef.id}`;
+              try { await setDoc(doc(db, 'users', uid, 'favorites', favId), { itemType: 'routine', itemId: docRef.id, createdAt: Date.now() }); } catch (e) { console.warn('Failed to favorite created routine', e); }
+            }
+          }
+        }
       }
       await loadList();
       resetComposer();
@@ -1758,19 +1831,57 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession) 
     try {
       const uid = auth.currentUser?.uid;
       if (!uid) { setItems([]); setLoading(false); return; }
-      const ref = collection(db, 'users', uid, 'routines');
-      const snaps = await getDocs(ref);
-      const data = snaps.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      let data: any[] = [];
+      if (filter === 'exercise') {
+        // load exercises
+        const ref = collection(db, 'users', uid, 'exercises');
+        const snaps = await getDocs(ref);
+        data = snaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: uid, kind: 'exercise' }));
+        // include public exercises from other users
+        try {
+          const cg = query(collectionGroup(db, 'exercises'), where('public', '==', true));
+          const publicSnaps = await getDocs(cg);
+          const pub = publicSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'exercise' }));
+          for (const p of pub) if (p.owner !== uid) data.push(p);
+        } catch (e) { console.warn('Failed to load public exercises', e); }
+      } else {
+        // load user's routines
+        const ref = collection(db, 'users', uid, 'routines');
+        const snaps = await getDocs(ref);
+        data = snaps.docs.map((d) => ({ id: d.id, ...(d.data() as any), owner: uid, kind: 'routine' }));
+        // also load public routines from other users (collection group)
+        try {
+          const cg = query(collectionGroup(db, 'routines'), where('public', '==', true));
+          const publicSnaps = await getDocs(cg);
+          const pub = publicSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
+          for (const p of pub) if (p.owner !== uid) data.push(p);
+        } catch (e) {
+          console.warn('Failed to load public routines collectionGroup', e);
+        }
+      }
+      // annotate with whether current user favorited each item (favorites stored per-user)
+      try {
+        const favSnaps = await getDocs(collection(db, 'users', uid, 'favorites'));
+        const favs = favSnaps.docs.map(d => d.data() as any);
+        const favSet = new Set(favs.map((f:any)=> `${f.itemType||'routine'}::${f.itemId}`));
+        data = data.map(it => ({ ...it, favorite: favSet.has(`${it.kind||'routine'}::${it.id}`) }));
+      } catch (e) {
+        console.warn('Failed to load favorites for user', e);
+      }
+      // basic filtering
+      if (filter !== 'all') {
+        if (filter === 'exercise') data = data.filter(it => (it.name||it.exercises?.map((e:any)=>e.name).join(' ')||'').toLowerCase().includes(filterQuery.toLowerCase()));
+        if (filter === 'workout') data = data.filter(it => (it.name||'').toLowerCase().includes(filterQuery.toLowerCase()));
+        if (filter === 'type') data = data.filter(it => (it.sessionTypes||[]).some((t:string)=> t.toLowerCase().includes(filterQuery.toLowerCase())));
+        if (filter === 'user') data = data.filter(it => ((it.ownerName||it.owner)||'').toLowerCase().includes(filterQuery.toLowerCase()));
+      }
       setItems(data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
     } catch (e) {
       console.error('Load routines list failed', e);
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadList(); }, []);
-
-  if (loading) return <div>Loading routines...</div>;
-  if (items.length === 0) return <div className="text-sm text-neutral-600">No routines yet. Save a session to add one.</div>;
+  useEffect(() => { loadList(); }, [filter]);
 
   return (
     <div className="space-y-3">
@@ -1780,11 +1891,17 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession) 
           <div className="flex items-center justify-between">
             <div>
               <div className="font-semibold">Routine Builder</div>
-              <div className="text-xs text-neutral-600">Create routines here and save to your library</div>
+                <div className="text-xs text-neutral-600">Create routines or single exercises and save to your library</div>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={resetComposer}>Clear</Button>
-              <Button onClick={saveComposerAsRoutine}>Save</Button>
+                <select value={composerKind} onChange={(e)=>setComposerKind(e.target.value as any)} className="border rounded px-2 py-1">
+                  <option value="routine">Workout (routine)</option>
+                  <option value="exercise">Single exercise</option>
+                </select>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={composerPublic} onChange={(e)=>setComposerPublic(e.target.checked)} /> Public</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={composerFavorite} onChange={(e)=>setComposerFavorite(e.target.checked)} /> Favorite</label>
+                <Button variant="outline" onClick={resetComposer}>Clear</Button>
+                <Button onClick={saveComposerAsRoutine}>Save</Button>
             </div>
           </div>
         </CardHeader>
@@ -1805,19 +1922,59 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession) 
           </div>
         </CardContent>
       </Card>
-      {items.map((it) => (
+      <div className="flex items-center gap-2">
+        <select value={filter} onChange={(e)=>setFilter(e.target.value as any)} className="border rounded px-2 py-1">
+          <option value="all">All</option>
+          <option value="exercise">Exercise</option>
+          <option value="workout">Workout</option>
+          <option value="type">Type</option>
+          <option value="user">User</option>
+        </select>
+  <Input placeholder="filter query" value={filterQuery} onChange={(e)=>setFilterQuery(e.target.value)} />
+        <Button variant="outline" onClick={() => loadList()}>Filter</Button>
+      </div>
+
+      {loading ? (
+        <div>Loading routines...</div>
+      ) : items.length === 0 ? (
+        <div className="text-sm text-neutral-600">No routines yet. Use the Routine Builder above to add exercises or workouts.</div>
+      ) : (
+        items.map((it) => (
         <Card key={it.id}>
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
                 <div className="font-semibold">{it.name}</div>
                 <div className="text-xs text-neutral-600">{(it.exercises || []).length} exercises</div>
+                <div className="text-xs text-neutral-500">{it.public ? 'Public' : 'Private'} {it.ownerName ? <span className="block text-[10px] text-neutral-400">{it.ownerName}</span> : it.owner ? <span className="block text-[10px] text-neutral-400">{it.owner}</span> : null}</div>
               </div>
               <div className="flex gap-2">
                 <Button onClick={() => {
                   const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
-                  onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0 });
+                  onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id });
                 }}>Load</Button>
+                <Button onClick={() => {
+                  const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
+                  onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id }, 'append');
+                }} title="Append to current session">Append</Button>
+                <Button variant="outline" onClick={async ()=>{
+                  try {
+                    const uid = auth.currentUser?.uid; if (!uid) return alert('Sign in');
+                    const itemType = (it.kind||'routine');
+                    const favId = `${itemType}::${it.id}`;
+                    // optimistic UI: update local state
+                    setItems(prev => prev.map(p => p.id === it.id ? { ...p, favorite: !(p.favorite) } : p));
+                    const favRef = doc(db, 'users', uid, 'favorites', favId);
+                    const favSnap = await getDoc(favRef);
+                    if (favSnap.exists()) {
+                      await deleteDoc(favRef);
+                    } else {
+                      await setDoc(favRef, { itemType, itemId: it.id, createdAt: Date.now() });
+                    }
+                  } catch(e) { console.error('Toggle fav failed', e); }
+                }} title="Toggle favorite">
+                  <Bookmark className={cn('h-4 w-4', it.favorite && 'text-yellow-500')} />
+                </Button>
                 <Button variant="outline" onClick={() => { setRenameTarget(it); setRenameValue(it.name); setShowRenameModal(true); }}>Rename</Button>
                 <Button variant="destructive" onClick={() => { setDeleteTarget(it); setShowDeleteModal(true); }}>Delete</Button>
               </div>
@@ -1827,7 +1984,8 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession) 
             <div className="text-sm">{(it.sessionTypes || []).join(', ')}</div>
           </CardContent>
         </Card>
-      ))}
+        ))
+      )}
       {/* Rename modal inside component */}
       {showRenameModal && renameTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
