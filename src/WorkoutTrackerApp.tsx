@@ -14,6 +14,8 @@ type WorkoutType = string; // flexible, user-defined types like 'Bike', 'Calves'
 type WeeklyDay = {
   dateISO: string; // yyyy-mm-dd
   types: Partial<Record<string, boolean>>; // did I do this type today?
+  sessions?: number; // legacy/simple count of sessions completed that day
+  sessionsList?: { sessionTypes: WorkoutType[] }[]; // detailed sessions per day
 };
 
 type WeeklyPlan = {
@@ -76,6 +78,8 @@ function defaultWeekly(): WeeklyPlan {
   const days = weekDates(monday).map((d) => ({
     dateISO: toISO(d),
     types: {},
+    sessions: 0,
+    sessionsList: [],
   }));
   return {
     weekOfISO: toISO(monday),
@@ -104,6 +108,55 @@ function ensureUniqueTypes(arr: string[]) {
   return Array.from(new Set(arr.map((s) => s.trim()).filter(Boolean)));
 }
 
+function normalizeWeekly(w: WeeklyPlan): WeeklyPlan {
+  const customTypes = ensureUniqueTypes(w.customTypes || []);
+  // ensure benchmarks keys exist for each customType
+  const benchmarks: Record<string, number> = { ...(w.benchmarks || {}) } as Record<string, number>;
+  customTypes.forEach((t) => {
+    if (!(t in benchmarks)) benchmarks[t] = 0;
+  });
+  // normalize days types to boolean
+  const days = (w.days || []).map((d) => {
+    const types: Record<string, boolean> = {};
+    Object.keys(d.types || {}).forEach((k) => {
+      const kk = String(k).trim();
+      if (!kk) return;
+      types[kk] = !!d.types[k];
+    });
+    // normalize sessionsList and dedupe by id or by JSON
+    const rawList = Array.isArray(d.sessionsList) ? d.sessionsList : [];
+    const seen = new Set<string>();
+    const sessionsList = rawList.reduce((acc: any[], s: any) => {
+      const key = s?.id ? String(s.id) : JSON.stringify(s?.sessionTypes || s);
+      if (seen.has(key)) return acc;
+      seen.add(key);
+      acc.push({ id: s?.id, sessionTypes: Array.isArray(s?.sessionTypes) ? s.sessionTypes : [] });
+      return acc;
+    }, []);
+    return { ...d, types, sessions: typeof d.sessions === 'number' ? d.sessions : (sessionsList.length || 0), sessionsList };
+  });
+  return { ...w, customTypes, benchmarks, days };
+}
+
+// Play a short beep using WebAudio API
+function playBeep() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.value = 880;
+    o.connect(g);
+    g.connect(ctx.destination);
+    g.gain.value = 0.1;
+    o.start();
+    setTimeout(() => { o.stop(); ctx.close(); }, 500);
+  } catch (e) {
+    // fallback: try simple alert sound
+    try { new Audio().play(); } catch (_) {}
+  }
+}
+
 function saveGlobalTypes(types: string[]) {
   try {
     localStorage.setItem(LS_TYPES_KEY, JSON.stringify(types));
@@ -126,6 +179,26 @@ function defaultSession(): ResistanceSession {
   };
 }
 
+// guard set to avoid double-processing of completeWorkout for same session object
+const completedGuards = new WeakSet<object>();
+
+// localStorage routines helpers
+const LS_ROUTINES = 'workout:routines';
+function loadLocalRoutines() {
+  try {
+    const raw = localStorage.getItem(LS_ROUTINES);
+    if (!raw) return [] as any[];
+    return JSON.parse(raw) as any[];
+  } catch { return [] as any[]; }
+}
+function saveLocalRoutine(item: any) {
+  try {
+    const cur = loadLocalRoutines();
+    cur.unshift(item);
+    localStorage.setItem(LS_ROUTINES, JSON.stringify(cur.slice(0, 100)));
+  } catch (e) { console.warn('Failed to save local routine', e); }
+}
+
 // --- Weekly Overview Component ---
 function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
   // normalize today's ISO (yyyy-mm-dd) using local date
@@ -136,19 +209,46 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
     const c: Record<string, number> = {};
     // initialize counts for custom types
     weekly.customTypes.forEach((t) => (c[t] = 0));
+    // If sessionsList is present, count per-session rather than per-type checkboxes
+    let usedSessionsList = false;
     weekly.days.forEach((d) => {
-      Object.keys(d.types).forEach((t) => {
-        if (d.types[t]) {
-          if (!(t in c)) c[t] = 0;
-          c[t] += 1;
-        }
-      });
+      if (Array.isArray(d.sessionsList) && d.sessionsList.length > 0) {
+        usedSessionsList = true;
+        d.sessionsList.forEach((s) => {
+          (s.sessionTypes || []).forEach((t) => {
+            if (!(t in c)) c[t] = 0;
+            c[t] += 1;
+          });
+        });
+      }
     });
+    if (!usedSessionsList) {
+      // fallback to counting type checkboxes
+      weekly.days.forEach((d) => {
+        Object.keys(d.types).forEach((t) => {
+          if (d.types[t]) {
+            if (!(t in c)) c[t] = 0;
+            c[t] += 1;
+          }
+        });
+      });
+    }
+    console.debug('[WT] WeeklyOverview counts computed', { counts: c, usedSessionsList, days: weekly.days.map(d => ({ dateISO: d.dateISO, types: d.types, sessions: d.sessions, sessionsList: d.sessionsList })) });
     return c;
   }, [weekly.days, weekly.customTypes]);
 
-  const totalToday = todayData ? Object.values(todayData.types).filter(Boolean).length : 0;
-  const weekProgress = Object.values(counts).reduce((a, b) => a + b, 0);
+  // Use sessionsList as authoritative source for distinct sessions
+  const totalToday = todayData
+    ? (Array.isArray(todayData.sessionsList) && todayData.sessionsList.length > 0
+        ? todayData.sessionsList.length
+        : (typeof todayData.sessions === 'number' && todayData.sessions > 0 ? todayData.sessions : Object.values(todayData.types).filter(Boolean).length))
+    : 0;
+
+  const weekProgress = weekly.days.reduce((sum, d) => {
+    if (Array.isArray(d.sessionsList) && d.sessionsList.length > 0) return sum + d.sessionsList.length;
+    if (typeof d.sessions === 'number' && d.sessions > 0) return sum + d.sessions;
+    return sum + Object.values(d.types || {}).filter(Boolean).length;
+  }, 0);
 
   return (
     <div className="space-y-4 mb-8">
@@ -267,9 +367,36 @@ export default function WorkoutTrackerApp() {
             if (wSnap.exists()) {
               const data = wSnap.data() as PersistedState;
               if (data?.weekly) {
-                // dedupe types
+                // dedupe types and normalize
                 const uniq = ensureUniqueTypes(data.weekly.customTypes || []);
-                setWeekly({ ...data.weekly, customTypes: uniq });
+                  let normalized = normalizeWeekly({ ...data.weekly, customTypes: uniq } as WeeklyPlan);
+                  console.debug('[WT] Loaded per-week state (raw)', { uid: u.uid, week: toISO(getMonday()), normalized });
+                  // If sessionsList is empty in the weekly doc, try to reconstruct from users/{uid}/sessions collection
+                  try {
+                    const snaps = await getDocs(collection(db, 'users', u.uid, 'sessions'));
+                    const items = snaps.docs.map(s => ({ id: s.id, ...(s.data() as any) }));
+                    if (items.length > 0) {
+                      // build map dateISO -> sessions
+                      const dateMap: Record<string, any[]> = {};
+                      normalized.days.forEach(d => { dateMap[d.dateISO] = []; });
+                      items.forEach(it => {
+                        const d = it.dateISO || toISO(new Date(it.completedAt || Date.now()));
+                        if (d && dateMap[d]) {
+                          dateMap[d].push(it);
+                        }
+                      });
+                      // merge only if weekly had no sessionsList data
+                      const hadSessions = normalized.days.some(d => Array.isArray(d.sessionsList) && d.sessionsList.length > 0);
+                      if (!hadSessions) {
+                        const days = normalized.days.map(d => ({ ...d, sessionsList: (dateMap[d.dateISO] || []).map(s => ({ sessionTypes: s.sessionTypes || [] })), sessions: (dateMap[d.dateISO] || []).length }));
+                        normalized = { ...normalized, days };
+                        console.debug('[WT] Reconstructed sessionsList from sessions collection', { uid: u.uid, reconstructed: days.map(dd => ({ dateISO: dd.dateISO, sessions: dd.sessions, sessionsListLen: (dd.sessionsList||[]).length })) });
+                      }
+                    }
+                  } catch (e) {
+                    console.warn('[WT] Failed to reconstruct sessionsList from sessions collection', e);
+                  }
+                  setWeekly(normalized);
               }
               if (data?.session) setSession(data.session);
             } else {
@@ -278,7 +405,11 @@ export default function WorkoutTrackerApp() {
               const snap = await getDoc(ref);
               if (snap.exists()) {
                 const data = snap.data() as PersistedState;
-                if (data?.weekly) setWeekly({ ...data.weekly, customTypes: ensureUniqueTypes(data.weekly.customTypes || []) });
+                if (data?.weekly) {
+                  const normalized = normalizeWeekly({ ...data.weekly, customTypes: ensureUniqueTypes(data.weekly.customTypes || []) } as WeeklyPlan);
+                  console.debug('[WT] Loaded legacy tracker state', { uid: u.uid, normalized });
+                  setWeekly(normalized);
+                }
                 if (data?.session) setSession(data.session);
               }
             }
@@ -292,7 +423,9 @@ export default function WorkoutTrackerApp() {
             if (sSnap.exists()) {
               const t = sSnap.data()?.types;
               if (Array.isArray(t) && t.length > 0) {
-                setWeekly((prev) => ({ ...prev, customTypes: ensureUniqueTypes(t) }));
+                  const custom = ensureUniqueTypes(t);
+                  console.debug('[WT] Loaded global types from settings', { uid: u.uid, custom });
+                  setWeekly((prev) => normalizeWeekly({ ...prev, customTypes: custom } as WeeklyPlan));
               }
             }
           } catch (e) {
@@ -326,13 +459,33 @@ export default function WorkoutTrackerApp() {
     }
   }, [userId, weekly, session]);
 
+  // Global floating countdown timer
+  const [countdownSec, setCountdownSec] = useState<number>(0);
+  const [countdownRunning, setCountdownRunning] = useState(false);
+  const [showCountdownModal, setShowCountdownModal] = useState(false);
+
+  useEffect(() => {
+    if (!countdownRunning) return;
+    const id = setInterval(() => {
+      setCountdownSec((s) => {
+        if (s <= 1) {
+          setCountdownRunning(false);
+          playBeep();
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [countdownRunning]);
+
   // (debugging removed) -- no console.debug left
 
   const resetWeek = async () => {
     const base = defaultWeekly();
     const uid = auth.currentUser?.uid;
     if (!uid) {
-      setWeekly(base);
+      setWeekly(normalizeWeekly(base));
       return;
     }
     try {
@@ -343,14 +496,14 @@ export default function WorkoutTrackerApp() {
       const ref = doc(db, 'users', uid, 'state', prevISO);
       const snap = await getDoc(ref);
       if (!snap.exists()) {
-        setWeekly(base);
+        setWeekly(normalizeWeekly(base));
         return;
       }
       const data = snap.data() as PersistedState;
-      const weeklyFromPrev = data.weekly || {} as WeeklyPlan;
+      const weeklyFromPrev = data.weekly || ({} as WeeklyPlan);
       const benchmarks = { ...base.benchmarks, ...(weeklyFromPrev.benchmarks || {}) } as Record<string, number>;
       const customTypes = ensureUniqueTypes([...(weeklyFromPrev.customTypes || base.customTypes)]);
-      setWeekly({ ...base, benchmarks, customTypes });
+      setWeekly(normalizeWeekly({ ...base, benchmarks, customTypes } as WeeklyPlan));
     } catch (e) {
       console.warn('Failed to copy previous week on reset', e);
       setWeekly(base);
@@ -414,6 +567,38 @@ export default function WorkoutTrackerApp() {
           </TabsContent>
         </Tabs>
       </div>
+        {/* Floating countdown button */}
+        <div className="fixed right-6 bottom-6 z-50">
+          <div className="relative">
+            <button className="w-12 h-12 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg" onClick={() => setShowCountdownModal(true)}>
+              ⏱️
+            </button>
+            {countdownRunning && (
+              <div className="absolute -top-2 -right-2 bg-red-600 text-white text-xs rounded-full px-2 py-0.5">{Math.floor(countdownSec/60)}:{String(countdownSec%60).padStart(2,'0')}</div>
+            )}
+          </div>
+        </div>
+
+        {/* Countdown modal */}
+        {showCountdownModal && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50">
+            <div className="bg-white p-6 rounded-lg w-full max-w-md">
+              <h3 className="text-lg font-semibold mb-2">Set countdown</h3>
+              <div className="flex gap-2 items-center">
+                <Input type="number" placeholder="minutes" value={Math.floor(countdownSec/60)} onChange={(e) => setCountdownSec(Math.max(0, parseInt(e.target.value||'0')*60))} />
+                <Input type="number" placeholder="seconds" value={countdownSec%60} onChange={(e) => setCountdownSec(Math.max(0, (Math.floor(countdownSec/60)*60) + parseInt(e.target.value||'0')))} />
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <Button variant="outline" onClick={() => { setShowCountdownModal(false); }}>Close</Button>
+                {!countdownRunning ? (
+                  <Button onClick={() => { if (countdownSec>0) setCountdownRunning(true); setShowCountdownModal(false); }}>Start</Button>
+                ) : (
+                  <Button variant="destructive" onClick={() => { setCountdownRunning(false); setCountdownSec(0); setShowCountdownModal(false); }}>Stop</Button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       {showSignIn && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4">
           <Card className="w-full max-w-sm">
@@ -489,11 +674,20 @@ function WeeklyTracker({
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
     types.forEach((t) => (c[t] = 0));
+    let usedSessionsList = false;
     weekly.days.forEach((d) => {
-      types.forEach((t) => {
-        if (d.types[t]) c[t] += 1;
-      });
+      if (Array.isArray(d.sessionsList) && d.sessionsList.length > 0) {
+        usedSessionsList = true;
+        d.sessionsList.forEach((s) => {
+          (s.sessionTypes || []).forEach((t) => { if (!(t in c)) c[t] = 0; c[t] += 1; });
+        });
+      }
     });
+    if (!usedSessionsList) {
+      weekly.days.forEach((d) => {
+        types.forEach((t) => { if (d.types[t]) c[t] += 1; });
+      });
+    }
     return c;
   }, [weekly.days, types]);
 
@@ -659,6 +853,26 @@ function WeeklyTracker({
           }} className="bg-white hover:bg-slate-50">
             <Save className="mr-2 h-4 w-4" /> Save settings
           </Button>
+          <Button variant="outline" onClick={async () => {
+            const uid = auth.currentUser?.uid; if (!uid) { alert('Sign in to rebuild from sessions'); return; }
+            try {
+              const snaps = await getDocs(collection(db, 'users', uid, 'sessions'));
+              const items = snaps.docs.map(s => ({ id: s.id, ...(s.data() as any) }));
+              if (items.length === 0) { alert('No session documents found to rebuild from'); return; }
+              const dateMap: Record<string, any[]> = {};
+              weekly.days.forEach(d => { dateMap[d.dateISO] = []; });
+              items.forEach(it => {
+                const d = it.dateISO || toISO(new Date(it.completedAt || Date.now()));
+                if (d && dateMap[d]) dateMap[d].push(it);
+              });
+              const days = weekly.days.map(d => ({ ...d, sessionsList: (dateMap[d.dateISO] || []).map(s => ({ sessionTypes: s.sessionTypes || [] })), sessions: (dateMap[d.dateISO] || []).length }));
+              const newWeekly = normalizeWeekly({ ...weekly, days } as WeeklyPlan);
+              await setDoc(doc(db, 'users', uid, 'state', weekly.weekOfISO), { weekly: newWeekly }, { merge: true });
+              setWeekly(newWeekly);
+              console.debug('[WT] Rebuilt weekly from sessions and saved', { week: weekly.weekOfISO, days: days.map(dd => ({ dateISO: dd.dateISO, sessions: dd.sessions })) });
+              alert('Rebuilt weekly from sessions and saved');
+            } catch (e) { console.error('Rebuild failed', e); alert('Rebuild failed - see console'); }
+          }}>Rebuild from sessions</Button>
         </div>
       </CardHeader>
       {/* Weekly table */}
@@ -751,6 +965,7 @@ function WeeklyTracker({
                               if (t === 'Bike' && !active) newTypes['Cardio'] = true;
                               // If Cardio turned off while Bike is on, keep Cardio if Bike is true
                               if (t === 'Cardio' && !newTypes['Cardio'] && newTypes['Bike']) newTypes['Cardio'] = true;
+                              console.debug('[WT] toggleType cell', { type: t, dateISO: days[idx].dateISO, before: day.types, after: newTypes, idx });
                               day.types = newTypes;
                               days[idx] = day;
                               setWeekly({ ...weekly, days });
@@ -901,12 +1116,20 @@ function WorkoutView({
   };
 
   const completeWorkout = () => {
+    // Prevent double-processing for the same session object
+    if (completedGuards.has(session)) {
+      console.warn('[WT] completeWorkout called but session already processed', { sessionName: session.sessionName, dateISO: session.dateISO });
+      return;
+    }
+    completedGuards.add(session);
+
     // Mark session as completed
     setSession({ ...session, completed: true, durationSec: timerSec });
     
     // Auto-populate weekly tracker
     const today = session.dateISO;
     const todayIndex = weekly.days.findIndex(d => d.dateISO === today);
+    console.debug('[WT] completeWorkout called', { sessionDate: today, todayIndex, sessionTypes: session.sessionTypes, weeklyDays: weekly.days.map(d => d.dateISO) });
     if (todayIndex !== -1) {
       const updatedDays = [...weekly.days];
       const markTypes: string[] = [...session.sessionTypes];
@@ -914,8 +1137,28 @@ function WorkoutView({
       if (markTypes.includes("Bike") && !markTypes.includes("Cardio")) markTypes.push("Cardio");
       const newTypes = { ...updatedDays[todayIndex].types } as Record<string, boolean>;
       markTypes.forEach((t) => { newTypes[t] = true; });
-      updatedDays[todayIndex] = { ...updatedDays[todayIndex], types: newTypes };
-      setWeekly({ ...weekly, days: updatedDays });
+      const before = { ...updatedDays[todayIndex].types, sessions: updatedDays[todayIndex].sessions };
+      // push a session record into sessionsList (authoritative list of sessions)
+      const oldList = Array.isArray(updatedDays[todayIndex].sessionsList) ? updatedDays[todayIndex].sessionsList.slice() : [];
+      oldList.push({ sessionTypes: markTypes });
+      const after = { ...newTypes, sessions: oldList.length };
+      console.debug('[WT] Updating day types and sessionsList', { dateISO: updatedDays[todayIndex].dateISO, before, after, markTypes, sessionsListBefore: updatedDays[todayIndex].sessionsList });
+      updatedDays[todayIndex] = { ...updatedDays[todayIndex], types: newTypes, sessions: after.sessions, sessionsList: oldList };
+      const newWeekly = { ...weekly, days: updatedDays } as WeeklyPlan;
+      setWeekly(newWeekly);
+      // Persist weekly immediately so sessionsList is saved server-side
+      (async () => {
+        try {
+          const uid = auth.currentUser?.uid;
+          if (!uid) return;
+          await setDoc(doc(db, 'users', uid, 'state', newWeekly.weekOfISO), { weekly: newWeekly }, { merge: true });
+          console.debug('[WT] persisted weekly after completeWorkout', { uid, week: newWeekly.weekOfISO });
+        } catch (e) {
+          console.error('[WT] failed to persist weekly after completeWorkout', e);
+        }
+      })();
+    } else {
+      console.warn('[WT] completeWorkout: todayIndex not found in weekly.days', { today, weeklyDays: weekly.days.map(d => d.dateISO) });
     }
     // persist completed session to Firestore under users/{uid}/sessions
     (async () => {
@@ -930,22 +1173,26 @@ function WorkoutView({
     })();
     // stop the timer when completed
     setTimerRunning(false);
+    // leave the guard true to prevent re-entry
   };
 
   // Save current session as a routine/template (no results)
   const saveRoutine = async () => {
     try {
       const uid = auth.currentUser?.uid;
-      if (!uid) {
-        alert('Please sign in to save routines');
-        return;
-      }
       const payload = {
+        id: crypto.randomUUID(),
         name: session.sessionName || 'Routine',
         exercises: session.exercises.map((e) => ({ id: e.id, name: e.name, minSets: e.minSets, targetReps: e.targetReps })),
         sessionTypes: session.sessionTypes,
         createdAt: Date.now(),
       };
+      if (!uid) {
+        // save locally
+        saveLocalRoutine(payload);
+        alert('Routine saved locally');
+        return;
+      }
       const ref = collection(db, 'users', uid, 'routines');
       await addDoc(ref, payload as any);
       alert('Routine saved');
@@ -959,7 +1206,13 @@ function WorkoutView({
     // show modal selection — load routines into local state for modal
     try {
       const uid = auth.currentUser?.uid;
-      if (!uid) { alert('Please sign in to load routines'); return; }
+      if (!uid) {
+        const items = loadLocalRoutines();
+        if (!items || items.length === 0) { alert('No local routines saved'); return; }
+        setRoutines(items);
+        setShowLoadModal(true);
+        return;
+      }
       const ref = collection(db, 'users', uid, 'routines');
       const snaps = await getDocs(ref);
       const items = snaps.docs.map((s) => ({ id: s.id, ...(s.data() as any) }));
@@ -1303,6 +1556,30 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession) 
   const [renameValue, setRenameValue] = useState('');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  // Composer / scratchpad state
+  const [composerName, setComposerName] = useState('');
+  const [composerExercises, setComposerExercises] = useState<ResistanceExercise[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const resetComposer = () => { setComposerName(''); setComposerExercises([]); setEditingId(null); };
+
+  const addComposerExercise = () => setComposerExercises(prev => [...prev, { id: crypto.randomUUID(), name: 'New exercise', minSets: 3, targetReps: 8, sets: [0,0,0] }]);
+
+  const saveComposerAsRoutine = async () => {
+    try {
+      const uid = auth.currentUser?.uid; if (!uid) return alert('Sign in to save');
+      if (!composerName) return alert('Name the routine');
+      const payload = { name: composerName, exercises: composerExercises.map(e => ({ name: e.name, minSets: e.minSets, targetReps: e.targetReps })), sessionTypes: [], createdAt: Date.now() };
+      const ref = collection(db, 'users', uid, 'routines');
+      if (editingId) {
+        await setDoc(doc(db, 'users', uid, 'routines', editingId), payload, { merge: true });
+      } else {
+        await addDoc(ref, payload as any);
+      }
+      await loadList();
+      resetComposer();
+    } catch (e) { console.error('Save composer failed', e); alert('Save failed'); }
+  };
 
   const loadList = async () => {
     setLoading(true);
@@ -1325,6 +1602,37 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession) 
 
   return (
     <div className="space-y-3">
+      {/* Composer */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="font-semibold">Routine Builder</div>
+              <div className="text-xs text-neutral-600">Create routines here and save to your library</div>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={resetComposer}>Clear</Button>
+              <Button onClick={saveComposerAsRoutine}>Save</Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-2">
+            <Input placeholder="Routine name" value={composerName} onChange={(e) => setComposerName(e.target.value)} />
+            <div className="space-y-2">
+              {composerExercises.map((ex, idx) => (
+                <div key={ex.id} className="flex gap-2 items-center">
+                  <Input value={ex.name} onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], name: e.target.value }; return c; })} />
+                  <Input type="number" value={String(ex.minSets)} onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], minSets: Math.max(1, parseInt(e.target.value||'1')) }; return c; })} className="w-20" />
+                  <Input type="number" value={String(ex.targetReps)} onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], targetReps: Math.max(1, parseInt(e.target.value||'1')) }; return c; })} className="w-20" />
+                  <Button variant="destructive" onClick={() => setComposerExercises(prev => prev.filter(p => p.id !== ex.id))}>Remove</Button>
+                </div>
+              ))}
+              <Button onClick={addComposerExercise}>Add exercise</Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
       {items.map((it) => (
         <Card key={it.id}>
           <CardHeader>
