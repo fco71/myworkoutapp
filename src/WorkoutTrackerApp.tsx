@@ -185,33 +185,7 @@ function playBeep() {
   }
 }
 
-// Top-level helper to rebuild weekly sessionsList from sessions collection
-async function rebuildWeeklyFromSessions(uid: string, baseWeekly: WeeklyPlan, setWeeklyFn: (w: WeeklyPlan) => void) {
-  try {
-    const snaps = await getDocs(collection(db, 'users', uid, 'sessions'));
-    const items = snaps.docs.map(s => ({ id: s.id, ...(s.data() as any) }));
-    const dateMap: Record<string, any[]> = {};
-    baseWeekly.days.forEach(d => { dateMap[d.dateISO] = []; });
-    items.forEach(it => {
-      let d: string | null = null;
-      if (it.dateISO) d = it.dateISO;
-      else if (it.date) d = it.date;
-      else if (it.completedAt) d = toISO(new Date(it.completedAt));
-      else if (it.createdAt) d = toISO(new Date(it.createdAt));
-      else if (it.ts) d = toISO(new Date(it.ts));
-      if (!d && it.timestamp) d = toISO(new Date(it.timestamp));
-      if (d && dateMap[d]) dateMap[d].push(it);
-    });
-    const days = baseWeekly.days.map(d => ({ ...d, sessionsList: (dateMap[d.dateISO] || []).map(s => ({ id: s.id, sessionTypes: s.sessionTypes || [] })), sessions: (dateMap[d.dateISO] || []).length }));
-    const normalized = normalizeWeekly({ ...baseWeekly, days } as WeeklyPlan);
-    // persist to server so client loads authoritative data
-    await setDoc(doc(db, 'users', uid, 'state', normalized.weekOfISO), { weekly: normalized }, { merge: true });
-    setWeeklyFn(normalized);
-    console.debug('[WT] rebuilt weekly after session deletions', safeString({ uid, week: normalized.weekOfISO }));
-  } catch (e) {
-    console.warn('[WT] rebuildWeeklyFromSessions failed', e);
-  }
-}
+// rebuildWeeklyFromSessions removed — weekly state is authoritative and driven by checkbox 'workouts' only
 
 function saveGlobalTypes(types: string[], categories?: Record<string, string>) {
   try {
@@ -974,26 +948,7 @@ function WeeklyTracker({
           }} className="bg-white hover:bg-slate-50">
             <Save className="mr-2 h-4 w-4" /> Save settings
           </Button>
-          <Button variant="outline" onClick={async () => {
-            const uid = auth.currentUser?.uid; if (!uid) { alert('Sign in to rebuild from sessions'); return; }
-            try {
-              const snaps = await getDocs(collection(db, 'users', uid, 'sessions'));
-              const items = snaps.docs.map(s => ({ id: s.id, ...(s.data() as any) }));
-              if (items.length === 0) { alert('No session documents found to rebuild from'); return; }
-              const dateMap: Record<string, any[]> = {};
-              weekly.days.forEach(d => { dateMap[d.dateISO] = []; });
-              items.forEach(it => {
-                const d = it.dateISO || toISO(new Date(it.completedAt || Date.now()));
-                if (d && dateMap[d]) dateMap[d].push(it);
-              });
-              const days = weekly.days.map(d => ({ ...d, sessionsList: (dateMap[d.dateISO] || []).map(s => ({ sessionTypes: s.sessionTypes || [] })), sessions: (dateMap[d.dateISO] || []).length }));
-              const newWeekly = normalizeWeekly({ ...weekly, days } as WeeklyPlan);
-              await setDoc(doc(db, 'users', uid, 'state', weekly.weekOfISO), { weekly: newWeekly }, { merge: true });
-              setWeekly(newWeekly);
-          console.debug('[WT] Rebuilt weekly from sessions and saved', safeString({ week: weekly.weekOfISO, days: days.map(dd => ({ dateISO: dd.dateISO, sessions: dd.sessions })) }));
-              alert('Rebuilt weekly from sessions and saved');
-            } catch (e) { console.error('Rebuild failed', e); alert('Rebuild failed - see console'); }
-          }}>Rebuild from sessions</Button>
+          {/* Rebuild from sessions removed per user request */}
           {/* Clear/repair buttons removed from header per user request */}
         </div>
       </CardHeader>
@@ -1165,17 +1120,16 @@ function WeeklyTracker({
                               setWeekly(newWeekly);
                               // persist weekly settings (ensure we persist the fresh newWeekly)
                               try { if (uid) await setDoc(doc(db, 'users', uid, 'state', newWeekly.weekOfISO), { weekly: newWeekly }, { merge: true }); } catch (e) { console.warn('[WT] failed to persist weekly after toggle', e); }
-                              // If we removed manual sessions, rebuild authoritative weekly from sessions collection
-                              if (!hasAny && uid) {
-                                try { await rebuildWeeklyFromSessions(uid, newWeekly, setWeekly); } catch (e) { /* ignore */ }
-                              }
+                              // No automatic session reconstruction — weekly state is authoritative.
                             }}
                         >
                           {active ? <Check className="inline h-4 w-4" /> : ""}
                         </td>
                       );
                     })}
-                    <td className="p-2 border-b font-semibold">{counts[t]}</td>
+                    <td className="p-2 border-b font-semibold">
+                      <span>{Math.min(7, counts[t])} <span className="text-[10px] text-neutral-500">days</span></span>
+                    </td>
                     <td className="p-2 border-b">
                       <div className="flex items-center gap-2">
                         <Input
@@ -1193,6 +1147,7 @@ function WeeklyTracker({
                             });
                           }}
                         />
+                        <span className="text-[10px] text-neutral-500">days</span>
                         {hit && (
                           <span className="text-green-700 text-xs flex items-center gap-1">
                             <Check className="h-4 w-4" /> goal met
