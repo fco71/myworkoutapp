@@ -422,6 +422,12 @@ export default function WorkoutTrackerApp() {
   // top-level toasts container for non-blocking messages
   const appToasts = useToasts();
 
+  // keep a global favorites snapshot map to keep optimistic updates reconciled across components
+  // This will be populated via a listener when a user signs in (see effect below in child components)
+  // Exposed via a simple ref-like object pattern (we attach to window for quick debug in dev)
+  // Note: we don't persist anything here; this is an app-level cache to avoid stale optimistic UI.
+  (window as any).__app_favorites_cache = (window as any).__app_favorites_cache || { map: new Map<string, boolean>() };
+
   // Offline cache is configured at Firestore initialization in lib/firebase
 
   // Auth + initial load
@@ -566,6 +572,18 @@ export default function WorkoutTrackerApp() {
   const [countdownRunning, setCountdownRunning] = useState(false);
   const [showCountdownModal, setShowCountdownModal] = useState(false);
 
+  // persist last-used countdown in localStorage
+  const LS_COUNTDOWN = 'workout:last_countdown_sec';
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_COUNTDOWN);
+      if (raw) {
+        const v = parseInt(raw || '0');
+        if (!isNaN(v) && v > 0) setCountdownSec(v);
+      }
+    } catch (e) { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     if (!countdownRunning) return;
     const id = setInterval(() => {
@@ -698,10 +716,25 @@ export default function WorkoutTrackerApp() {
                 <Input type="number" placeholder="minutes" value={Math.floor(countdownSec/60)} onChange={(e) => setCountdownSec(Math.max(0, parseInt(e.target.value||'0')*60))} />
                 <Input type="number" placeholder="seconds" value={countdownSec%60} onChange={(e) => setCountdownSec(Math.max(0, (Math.floor(countdownSec/60)*60) + parseInt(e.target.value||'0')))} />
               </div>
+              <div className="flex gap-2 mt-3">
+                {[30,60,90,120,180].map(s => (
+                  <Button key={s} variant="outline" onClick={() => setCountdownSec(s)}>{`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`}</Button>
+                ))}
+                {(() => {
+                  try {
+                    const last = parseInt(localStorage.getItem(LS_COUNTDOWN) || '0');
+                    if (!isNaN(last) && last > 0) {
+                      const mm = Math.floor(last/60); const ss = String(last%60).padStart(2,'0');
+                      return <Button variant="secondary" onClick={() => setCountdownSec(last)}>{`${mm}:${ss} (Last)`}</Button>;
+                    }
+                  } catch (e) { /* ignore */ }
+                  return null;
+                })()}
+              </div>
               <div className="flex justify-end gap-2 mt-4">
                 <Button variant="outline" onClick={() => { setShowCountdownModal(false); }}>Close</Button>
                 {!countdownRunning ? (
-                  <Button onClick={() => { if (countdownSec>0) setCountdownRunning(true); setShowCountdownModal(false); }}>Start</Button>
+                  <Button onClick={() => { if (countdownSec>0) { try { localStorage.setItem(LS_COUNTDOWN, String(countdownSec)); } catch (e) {} setCountdownRunning(true); } setShowCountdownModal(false); }}>Start</Button>
                 ) : (
                   <Button variant="destructive" onClick={() => { setCountdownRunning(false); setCountdownSec(0); setShowCountdownModal(false); }}>Stop</Button>
                 )}
@@ -1202,11 +1235,13 @@ function WorkoutView({
   setWeekly: (w: WeeklyPlan) => void;
 }) {
   const toasts = useToasts();
+  const [pendingFavorites, setPendingFavorites] = useState<Set<string>>(new Set());
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerSec, setTimerSec] = useState<number>(session.durationSec || 0);
   const [routines, setRoutines] = useState<any[]>([]);
   const [showLoadModal, setShowLoadModal] = useState(false);
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
+  const [sessionFavorited, setSessionFavorited] = useState<boolean>(false);
 
   useEffect(() => {
     let id: any = null;
@@ -1218,17 +1253,45 @@ function WorkoutView({
     };
   }, [timerRunning]);
 
+  // initialize whether current session (template) is favorited by the user
+  useEffect(() => {
+    let mounted = true;
+    const initFav = async () => {
+      try {
+        const uid = auth.currentUser?.uid;
+        const itemId = session.sourceTemplateId;
+        if (!uid || !itemId) return;
+        // attach a snapshot listener for this user's favorites so UI stays in sync across tabs
+        const unsub = (await import('firebase/firestore')).onSnapshot(collection(db, 'users', uid, 'favorites'), (snap) => {
+          try {
+            const favSet = new Set<string>();
+            snap.docs.forEach(d => {
+              const data = d.data() as any;
+              favSet.add(`${data.itemType||'routine'}::${data.itemId}`);
+            });
+            // write to shared cache
+            (window as any).__app_favorites_cache.map = favSet;
+            const favId = `routine::${itemId}`;
+            if (mounted) setSessionFavorited(favSet.has(favId));
+          } catch (e) { console.warn('favorites snapshot handling failed', e); }
+        });
+        return () => unsub && unsub();
+      } catch (e) {
+        console.warn('Failed to load session favorite', e);
+      }
+    };
+    // call initFav
+    (async () => { await initFav(); })();
+    return () => { mounted = false; };
+  }, [session.sourceTemplateId]);
+
   useEffect(() => {
     // keep session.durationSec in sync while editing
     setSession({ ...session, durationSec: timerSec });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerSec]);
 
-  const formatTime = (s: number) => {
-    const mm = Math.floor(s / 60);
-    const ss = s % 60;
-    return `${mm.toString().padStart(2, '0')}:${ss.toString().padStart(2, '0')}`;
-  };
+  // timer formatting handled inline where needed; removed helper to avoid unused warning
 
   const resetTimer = () => {
     setTimerRunning(false);
@@ -1424,7 +1487,7 @@ function WorkoutView({
                 </p>
               </div>
               <div className="flex flex-col items-end gap-2">
-                <div className="text-sm text-neutral-700">Timer: {formatTime(timerSec)}</div>
+                {/* Removed inline timer display — main timer remains below as requested */}
                 <div className="flex gap-2">
                   {!timerRunning ? (
                     <Button onClick={() => setTimerRunning(true)}>Start</Button>
@@ -1444,15 +1507,28 @@ function WorkoutView({
                   <Button variant="outline" onClick={async ()=>{
                     try {
                       const uid = auth.currentUser?.uid; if (!uid) return toasts.push('Sign in to favorite', 'info');
-                      // determine template id (if any)
                       const itemId = session.sourceTemplateId;
                       const itemType = itemId ? 'routine' : null;
                       if (itemId) {
+                        // prevent rapid toggles by tracking pending favs
                         const favId = `${itemType}::${itemId}`;
-                        const favRef = doc(db, 'users', uid, 'favorites', favId);
-                        const favSnap = await getDoc(favRef);
-                        if (favSnap.exists()) { await deleteDoc(favRef); toasts.push('Removed favorite', 'success'); }
-                        else { await setDoc(favRef, { itemType, itemId, createdAt: Date.now() }); toasts.push('Favorited', 'success'); }
+                        if (pendingFavorites.has(favId)) return; // noop while pending
+                        setPendingFavorites(prev => new Set(prev).add(favId));
+                        // optimistic UI
+                        setSessionFavorited((s) => !s);
+                        try {
+                          const favRef = doc(db, 'users', uid, 'favorites', favId);
+                          const favSnap = await getDoc(favRef);
+                          if (favSnap.exists()) { await deleteDoc(favRef); toasts.push('Removed favorite', 'success'); }
+                          else { await setDoc(favRef, { itemType, itemId, createdAt: Date.now() }); toasts.push('Favorited', 'success'); }
+                        } catch (e) {
+                          console.error('Favorite current session failed', e);
+                          // rollback
+                          setSessionFavorited((s) => !s);
+                          toasts.push('Failed', 'error');
+                        } finally {
+                          setPendingFavorites(prev => { const n = new Set(prev); n.delete(favId); return n; });
+                        }
                         return;
                       }
                       // no template id: save current session as routine and favorite it
@@ -1460,11 +1536,17 @@ function WorkoutView({
                       const ref = collection(db, 'users', uid, 'routines');
                       const docRef = await addDoc(ref, payload as any);
                       const favId = `routine::${docRef.id}`;
-                      await setDoc(doc(db, 'users', uid, 'favorites', favId), { itemType: 'routine', itemId: docRef.id, createdAt: Date.now() });
-                      toasts.push('Saved routine and favorited', 'success');
+                      setPendingFavorites(prev => new Set(prev).add(favId));
+                      try {
+                        await setDoc(doc(db, 'users', uid, 'favorites', favId), { itemType: 'routine', itemId: docRef.id, createdAt: Date.now() });
+                        toasts.push('Saved routine and favorited', 'success');
+                      } catch (e) {
+                        console.error('Favorite current session failed', e);
+                        toasts.push('Failed', 'error');
+                      } finally { setPendingFavorites(prev => { const n = new Set(prev); n.delete(favId); return n; }); }
                     } catch (e) { console.error('Favorite current session failed', e); toasts.push('Failed', 'error'); }
-                  }} title="Favorite this session">
-                    <Bookmark className="h-4 w-4" />
+                  }} title="Favorite this session" disabled={!!(session.sourceTemplateId && pendingFavorites.has(`routine::${session.sourceTemplateId}`))}>
+                    <Bookmark className={cn('h-4 w-4', sessionFavorited && 'text-yellow-500')} />
                   </Button>
               </div>
             </div>
@@ -1787,6 +1869,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all'|'exercise'|'workout'|'type'|'user'>('all');
   const [filterQuery, setFilterQuery] = useState('');
+  const [pendingFavorites, setPendingFavorites] = useState<Set<string>>(new Set());
 
   const resetComposer = () => { setComposerName(''); setComposerExercises([]); setEditingId(null); };
 
@@ -1901,6 +1984,8 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
         const favSnaps = await getDocs(collection(db, 'users', uid, 'favorites'));
         const favs = favSnaps.docs.map(d => d.data() as any);
         const favSet = new Set(favs.map((f:any)=> `${f.itemType||'routine'}::${f.itemId}`));
+        // write to global cache
+        (window as any).__app_favorites_cache.map = favSet;
         data = data.map(it => ({ ...it, favorite: favSet.has(`${it.kind||'routine'}::${it.id}`) }));
       } catch (e) {
         console.warn('Failed to load favorites for user', e);
@@ -1919,6 +2004,36 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
   };
 
   useEffect(() => { loadList(); }, [filter]);
+
+  // keep favorites in sync in real-time for signed-in user
+  useEffect(() => {
+    let unsub: any = null;
+    let mounted = true;
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    try {
+      // subscribe to favorites collection and update items' favorite flags
+      const col = collection(db, 'users', uid, 'favorites');
+      unsub = (async () => {
+        const onSnap = (await import('firebase/firestore')).onSnapshot as any;
+        return onSnap(col, (snap: any) => {
+          try {
+            const favSet = new Set<string>();
+            snap.docs.forEach((d: any) => {
+              const data = d.data();
+              favSet.add(`${data.itemType||'routine'}::${data.itemId}`);
+            });
+            (window as any).__app_favorites_cache.map = favSet;
+            if (!mounted) return;
+            setItems(prev => prev.map(it => ({ ...it, favorite: favSet.has(`${it.kind||'routine'}::${it.id}`) })));
+          } catch (e) { console.warn('favorites snapshot handler failed', e); }
+        });
+      })();
+    } catch (e) {
+      console.warn('Failed to subscribe to favorites', e);
+    }
+    return () => { mounted = false; if (unsub && typeof unsub === 'function') unsub(); };
+  }, []);
 
   return (
     <div className="space-y-3">
@@ -1998,21 +2113,42 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
                   onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id }, 'append');
                 }} title="Append to current session">Append</Button>
                 <Button variant="outline" onClick={async ()=>{
+                  const uid = auth.currentUser?.uid; if (!uid) return toasts.push('Sign in', 'info');
+                  const itemType = (it.kind||'routine');
+                  const favId = `${itemType}::${it.id}`;
+                  if (pendingFavorites.has(favId)) return; // noop while pending
+                  // optimistic UI: update local state and remember previous state for rollback
+                  const prev = items;
+                  const initial = !!it.favorite;
+                  const optimistic = prev.map(p => p.id === it.id ? { ...p, favorite: !initial } : p);
+                  setItems(optimistic);
+                  setPendingFavorites(prev => new Set(prev).add(favId));
                   try {
-                    const uid = auth.currentUser?.uid; if (!uid) return toasts.push('Sign in', 'info');
-                    const itemType = (it.kind||'routine');
-                    const favId = `${itemType}::${it.id}`;
-                    // optimistic UI: update local state
-                    setItems(prev => prev.map(p => p.id === it.id ? { ...p, favorite: !(p.favorite) } : p));
                     const favRef = doc(db, 'users', uid, 'favorites', favId);
                     const favSnap = await getDoc(favRef);
                     if (favSnap.exists()) {
                       await deleteDoc(favRef);
+                      toasts.push('Removed favorite', 'success');
                     } else {
                       await setDoc(favRef, { itemType, itemId: it.id, createdAt: Date.now() });
+                      toasts.push('Favorited', 'success');
                     }
-                  } catch(e) { console.error('Toggle fav failed', e); }
-                }} title="Toggle favorite">
+                    // update shared cache
+                    try {
+                      const cur: Set<string> = (window as any).__app_favorites_cache.map || new Set();
+                      const newSet = new Set(cur);
+                      if (initial) newSet.delete(favId); else newSet.add(favId);
+                      (window as any).__app_favorites_cache.map = newSet;
+                    } catch (e) { /* ignore cache failures */ }
+                  } catch (e) {
+                    console.error('Toggle fav failed', e);
+                    // rollback optimistic change
+                    setItems(prev);
+                    toasts.push('Failed to toggle favorite', 'error');
+                  } finally {
+                    setPendingFavorites(prev => { const n = new Set(prev); n.delete(favId); return n; });
+                  }
+                }} title="Toggle favorite" disabled={pendingFavorites.has(`${it.kind||'routine'}::${it.id}`)}>
                   <Bookmark className={cn('h-4 w-4', it.favorite && 'text-yellow-500')} />
                 </Button>
                 <Button variant="outline" onClick={() => { setRenameTarget(it); setRenameValue(it.name); setShowRenameModal(true); }}>Rename</Button>

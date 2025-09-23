@@ -84,7 +84,7 @@ class WorkoutManager {
             this.loadExercises();
         } catch (error) {
             console.error('Error saving exercise:', error);
-            alert('Failed to save exercise. Please try again.');
+            console.warn('Failed to save exercise. Please try again.');
         }
     }
 
@@ -216,7 +216,7 @@ class WorkoutManager {
             this.loadWorkouts();
         } catch (error) {
             console.error('Error saving workout:', error);
-            alert('Failed to save workout. Please try again.');
+            console.warn('Failed to save workout. Please try again.');
         }
     }
 
@@ -348,10 +348,10 @@ class WorkoutManager {
             document.getElementById('workoutListContainer').classList.remove('hidden');
             
             // Show success message
-            alert('Workout saved successfully!');
+            console.log('Workout saved successfully!');
         } catch (error) {
             console.error('Error saving workout log:', error);
-            alert('Failed to save workout. Please try again.');
+            console.warn('Failed to save workout. Please try again.');
         }
     }
 

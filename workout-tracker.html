@@ -1550,7 +1550,7 @@
             const targetReps = isTracked ? 10 : 1; // Default to 1 for logged activities
             
             if (!name) {
-                alert('Please enter an exercise name');
+                console.warn('Please enter an exercise name');
                 return;
             }
             
@@ -2089,7 +2089,7 @@
                     updateGoalsDisplay();
                     modal.style.display = 'none';
                 } else {
-                    alert('Please add at least one valid goal.');
+                    console.warn('Please add at least one valid goal.');
                 }
             });
             
