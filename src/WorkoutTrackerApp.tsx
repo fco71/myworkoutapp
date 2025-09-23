@@ -651,84 +651,7 @@ export default function WorkoutTrackerApp() {
                   Sign in
                 </Button>
               )}
-              <Button variant="ghost" onClick={() => {
-                // Rich debug dump: compute from a cleaned copy of weekly (defensive normalization)
-                try {
-                  const cleanedDays = weekly.days.map(d => {
-                    const types: Record<string, boolean> = {};
-                    Object.keys(d.types || {}).forEach(k => { types[String(k).trim()] = !!d.types[k]; });
-                    const any = Object.values(types).some(Boolean);
-                    return { ...d, types, sessionsList: any ? (d.sessionsList || []) : [], sessions: any ? (d.sessions || (d.sessionsList||[]).length) : 0 };
-                  });
-                  const perDay = cleanedDays.map(d => ({ dateISO: d.dateISO, types: d.types, dayTotal: Object.values(d.types||{}).filter(Boolean).length, sessionsListLen: (d.sessionsList||[]).length }));
-                  const typeTotals: Record<string, number> = {};
-                  (weekly.customTypes || []).forEach(t => typeTotals[t] = cleanedDays.reduce((a,d) => a + (d.types?.[t] ? 1 : 0), 0));
-                  const todayIso = toISO(new Date());
-                  const todayDay = cleanedDays.find(d => d.dateISO === todayIso);
-                  const todayCount = todayDay ? Object.values(todayDay.types||{}).filter(Boolean).length : 0;
-                  const weekCount = cleanedDays.reduce((acc,d) => acc + Object.values(d.types||{}).filter(Boolean).length, 0);
-                  const typeCats = weekly.typeCategories || {};
-                  const resistanceCountLocal = (weekly.customTypes || []).reduce((acc, t) => (typeCats[t] === 'Resistance' ? acc + cleanedDays.reduce((a,d) => a + (d.types[t] ? 1 : 0), 0) : acc), 0);
-                  // compute cardio like the UI: normalize Bike/Cardio per day
-                  const cardioCountLocal = cleanedDays.reduce((acc, d) => {
-                    const keys = Object.keys(d.types || {}).filter(k => d.types[k]);
-                    const seen = new Set<string>();
-                    keys.forEach((t) => {
-                      if (t === 'Bike' || t === 'Cardio' || typeCats[t] === 'Cardio') seen.add('Cardio');
-                    });
-                    return acc + seen.size;
-                  }, 0);
-                  const computed = { today: todayCount, week: weekCount, resistance: resistanceCountLocal, cardio: cardioCountLocal };
-                  console.debug('[WT] DEBUG DUMP', safeString({ userId, userName, weekOfISO: weekly.weekOfISO, perDay, typeTotals, typeCategories: weekly.typeCategories || {}, computed }));
-                } catch (e) {
-                  console.debug('[WT] DEBUG DUMP FAILED', e);
-                }
-              }}>
-                Debug dump
-              </Button>
-              <Button variant="ghost" onClick={async () => {
-                // Clear all checks for the current week and persist to Firestore (if signed in)
-                try {
-                  const uid = auth.currentUser?.uid;
-                  const cleaned = { ...weekly, days: weekly.days.map(d => ({ ...d, types: {}, sessions: 0, sessionsList: [] })) } as WeeklyPlan;
-                  setWeekly(normalizeWeekly(cleaned));
-                  if (uid) {
-                    await setDoc(doc(db, 'users', uid, 'state', cleaned.weekOfISO), { weekly: cleaned }, { merge: true });
-                    console.debug('[WT] Cleared all checks and persisted cleaned weekly', safeString({ uid, weekOfISO: cleaned.weekOfISO }));
-                  } else {
-                    console.debug('[WT] Cleared all checks locally (not signed in)');
-                  }
-                } catch (e) {
-                  console.warn('[WT] Failed to clear checks', e);
-                }
-              }}>
-                Clear all checks (persist)
-              </Button>
-              <Button variant="ghost" onClick={async () => {
-                // Fix Bike/Cardio duplicates: for days where both Bike and Cardio are checked, uncheck Cardio and persist
-                try {
-                  const uid = auth.currentUser?.uid;
-                  const repaired = { ...weekly, days: weekly.days.map(d => {
-                    const types: Record<string, boolean> = {};
-                    Object.keys(d.types || {}).forEach(k => { types[String(k).trim()] = !!d.types[k]; });
-                    if (types['Bike'] && types['Cardio']) {
-                      types['Cardio'] = false;
-                    }
-                    return { ...d, types } as any;
-                  }) } as WeeklyPlan;
-                  setWeekly(normalizeWeekly(repaired));
-                  if (uid) {
-                    await setDoc(doc(db, 'users', uid, 'state', repaired.weekOfISO), { weekly: repaired }, { merge: true });
-                    console.debug('[WT] Fixed Bike/Cardio duplicates and persisted cleaned weekly', safeString({ uid, weekOfISO: repaired.weekOfISO }));
-                  } else {
-                    console.debug('[WT] Fixed Bike/Cardio duplicates locally (not signed in)');
-                  }
-                } catch (e) {
-                  console.warn('[WT] Failed to repair Bike/Cardio duplicates', e);
-                }
-              }}>
-                Fix Bike/Cardio duplicates (persist)
-              </Button>
+              {/* Debug and repair buttons removed to reduce clutter */}
             </div>
           </div>
           
@@ -1071,36 +994,7 @@ function WeeklyTracker({
               alert('Rebuilt weekly from sessions and saved');
             } catch (e) { console.error('Rebuild failed', e); alert('Rebuild failed - see console'); }
           }}>Rebuild from sessions</Button>
-          <Button variant="destructive" onClick={async () => {
-            if (!confirm('Clear all checked boxes for this week? This cannot be undone.')) return;
-            const clearedDays = weekly.days.map(d => ({ ...d, types: {}, sessionsList: [], sessions: 0 }));
-            const newWeekly = normalizeWeekly({ ...weekly, days: clearedDays } as WeeklyPlan);
-            setWeekly(newWeekly);
-            const uid = auth.currentUser?.uid;
-            if (uid) {
-              try { await setDoc(doc(db, 'users', uid, 'state', newWeekly.weekOfISO), { weekly: newWeekly }, { merge: true }); alert('Cleared week'); } catch (e) { console.warn('Failed to persist cleared week', e); alert('Cleared locally but failed to persist'); }
-            } else {
-              alert('Cleared locally');
-            }
-          }}>Clear all checks</Button>
-          <Button variant="outline" onClick={async () => {
-            if (!confirm('Fix Bike/Cardio duplicates for this week? This will uncheck Cardio on days where Bike is checked.')) return;
-            const fixedDays = weekly.days.map(d => {
-              const types = { ...(d.types || {}) } as Record<string, boolean>;
-              if (types['Bike'] && types['Cardio']) {
-                types['Cardio'] = false;
-              }
-              return { ...d, types };
-            });
-            const newWeekly = normalizeWeekly({ ...weekly, days: fixedDays } as WeeklyPlan);
-            setWeekly(newWeekly);
-            const uid = auth.currentUser?.uid;
-            if (uid) {
-              try { await setDoc(doc(db, 'users', uid, 'state', newWeekly.weekOfISO), { weekly: newWeekly }, { merge: true }); alert('Fixed duplicates and saved'); } catch (e) { console.warn('Failed to persist fixed week', e); alert('Fixed locally but failed to persist'); }
-            } else {
-              alert('Fixed locally');
-            }
-          }}>Fix Bike/Cardio duplicates</Button>
+          {/* Clear/repair buttons removed from header per user request */}
         </div>
       </CardHeader>
       {/* Weekly table */}
@@ -1187,13 +1081,7 @@ function WeeklyTracker({
                   <th key={d.dateISO} className="p-2 text-xs font-medium border-b">
                     {new Date(d.dateISO + 'T00:00').toLocaleDateString(undefined, { weekday: "short" })}
                     <div className="text-[10px] text-neutral-500">{new Date(d.dateISO + 'T00:00').getDate()}</div>
-                    <div className="text-[10px] mt-1">
-                      {(() => {
-                        const list = d.sessionsList || [];
-                        const real = list.filter((s:any) => s?.id && !String(s.id).startsWith('manual:')).length;
-                        return (<span className="inline-block bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-[10px]">{real} sessions</span>);
-                      })()}
-                    </div>
+                    {/* session badge removed as requested */}
                   </th>
                 ))}
                 <th className="p-2 text-left border-b">Total</th>
