@@ -81,9 +81,35 @@ function defaultWeekly(): WeeklyPlan {
     weekOfISO: toISO(monday),
     weekNumber: 1,
     days,
-    benchmarks: { Bike: 3, Calves: 2, Resistance: 3, Cardio: 2, Mobility: 2, Other: 1 },
+    // default weekly benchmarks (editable per week)
+    benchmarks: { Bike: 3, Calves: 4, Resistance: 2, Cardio: 2, Mobility: 2, Other: 1 },
     customTypes: ["Bike", "Calves", "Resistance"],
   };
+}
+
+// --- localStorage helpers for global types ---
+const LS_TYPES_KEY = "workout:types";
+function loadGlobalTypes(): string[] {
+  try {
+    const raw = localStorage.getItem(LS_TYPES_KEY);
+    if (!raw) return ["Bike", "Calves", "Resistance"];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : ["Bike", "Calves", "Resistance"];
+  } catch {
+    return ["Bike", "Calves", "Resistance"];
+  }
+}
+
+function ensureUniqueTypes(arr: string[]) {
+  return Array.from(new Set(arr.map((s) => s.trim()).filter(Boolean)));
+}
+
+function saveGlobalTypes(types: string[]) {
+  try {
+    localStorage.setItem(LS_TYPES_KEY, JSON.stringify(types));
+  } catch (e) {
+    console.warn("Failed to save global types", e);
+  }
 }
 
 function defaultSession(): ResistanceSession {
@@ -219,6 +245,7 @@ export default function WorkoutTrackerApp() {
   const [session, setSession] = useState<ResistanceSession>(defaultSession());
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
+  const [initialized, setInitialized] = useState(false);
   const [showSignIn, setShowSignIn] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
@@ -233,16 +260,50 @@ export default function WorkoutTrackerApp() {
         if (u) {
           setUserId(u.uid);
           setUserName(u.displayName || u.email || null);
-          const ref = doc(db, "users", u.uid, "state", "tracker");
-          const snap = await getDoc(ref);
-          if (snap.exists()) {
-            const data = snap.data() as PersistedState;
-            if (data?.weekly) setWeekly(data.weekly);
-            if (data?.session) setSession(data.session);
+          // Prefer per-week document keyed by weekOfISO. Fall back to the legacy 'tracker' doc.
+          try {
+            const weekRef = doc(db, 'users', u.uid, 'state', toISO(getMonday()));
+            const wSnap = await getDoc(weekRef);
+            if (wSnap.exists()) {
+              const data = wSnap.data() as PersistedState;
+              if (data?.weekly) {
+                // dedupe types
+                const uniq = ensureUniqueTypes(data.weekly.customTypes || []);
+                setWeekly({ ...data.weekly, customTypes: uniq });
+              }
+              if (data?.session) setSession(data.session);
+            } else {
+              // fallback to legacy tracker doc
+              const ref = doc(db, "users", u.uid, "state", "tracker");
+              const snap = await getDoc(ref);
+              if (snap.exists()) {
+                const data = snap.data() as PersistedState;
+                if (data?.weekly) setWeekly({ ...data.weekly, customTypes: ensureUniqueTypes(data.weekly.customTypes || []) });
+                if (data?.session) setSession(data.session);
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to load per-week state, falling back to tracker', e);
           }
+          // load global types from Firestore if present
+          try {
+            const settingsRef = doc(db, 'users', u.uid, 'settings', 'types');
+            const sSnap = await getDoc(settingsRef);
+            if (sSnap.exists()) {
+              const t = sSnap.data()?.types;
+              if (Array.isArray(t) && t.length > 0) {
+                setWeekly((prev) => ({ ...prev, customTypes: ensureUniqueTypes(t) }));
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to load settings/types from Firestore', e);
+          }
+          // finished initial load; enable autosave
+          setInitialized(true);
         } else {
           setUserId(null);
           setUserName(null);
+          setInitialized(false);
         }
       } finally {
         // finished loading
@@ -253,11 +314,23 @@ export default function WorkoutTrackerApp() {
 
   // autosave to Firestore
   useEffect(() => {
-    if (!userId) return;
-    const ref = doc(db, "users", userId, "state", "tracker");
-    const payload: PersistedState = { weekly, session };
-    setDoc(ref, payload, { merge: true }).catch(() => {});
+    // don't autosave until we've loaded the initial state from Firestore
+    if (!userId || !initialized) return;
+    // autosave to per-week document keyed by weekly.weekOfISO
+    try {
+      const ref = doc(db, "users", userId, "state", weekly.weekOfISO);
+      const payload: PersistedState = { weekly, session };
+      setDoc(ref, payload, { merge: true }).catch(() => {});
+    } catch (e) {
+      console.warn('Autosave failed', e);
+    }
   }, [userId, weekly, session]);
+
+  // dev: log weekly types/benchmarks after initial load for debugging
+  useEffect(() => {
+    if (!initialized) return;
+    console.debug('Weekly loaded:', { weekOfISO: weekly.weekOfISO, types: weekly.customTypes, benchmarks: weekly.benchmarks });
+  }, [initialized]);
 
   const resetWeek = () => setWeekly(defaultWeekly());
   const resetSession = () => setSession(defaultSession());
@@ -399,6 +472,15 @@ function WeeklyTracker({
   const monday = new Date(weekly.weekOfISO);
   const [newTypeName, setNewTypeName] = useState("");
 
+  // On mount, ensure weekly.customTypes is populated from global settings if needed
+  useEffect(() => {
+    if (!weekly.customTypes || weekly.customTypes.length === 0) {
+      const globals = loadGlobalTypes();
+      setWeekly({ ...weekly, customTypes: globals });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const addType = () => {
     const name = newTypeName.trim();
     if (!name) return;
@@ -408,6 +490,18 @@ function WeeklyTracker({
     }
     const updated = { ...weekly, customTypes: [...weekly.customTypes, name], benchmarks: { ...weekly.benchmarks, [name]: 0 } };
     setWeekly(updated);
+    saveGlobalTypes(updated.customTypes);
+    // save to Firestore if user signed in
+    (async () => {
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+      try {
+        const ref = doc(db, 'users', uid, 'settings', 'types');
+        await setDoc(ref, { types: updated.customTypes }, { merge: true });
+      } catch (e) {
+        console.warn('Failed to save types to Firestore', e);
+      }
+    })();
     setNewTypeName("");
   };
 
@@ -421,6 +515,12 @@ function WeeklyTracker({
       return { ...d, types };
     });
     setWeekly({ ...weekly, customTypes, benchmarks, days });
+    saveGlobalTypes(customTypes);
+    (async () => {
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+      try { await setDoc(doc(db, 'users', uid, 'settings', 'types'), { types: customTypes }, { merge: true }); } catch (e) { console.warn('Failed to save types to Firestore', e); }
+    })();
   };
 
   const renameType = (oldName: string, newName: string) => {
@@ -439,7 +539,50 @@ function WeeklyTracker({
       return { ...d, types };
     });
     setWeekly({ ...weekly, customTypes, benchmarks, days });
+    saveGlobalTypes(customTypes);
+    (async () => {
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+      try { await setDoc(doc(db, 'users', uid, 'settings', 'types'), { types: customTypes }, { merge: true }); } catch (e) { console.warn('Failed to save types to Firestore', e); }
+    })();
   };
+
+  // --- Modal state for rename / remove ---
+  const [showModal, setShowModal] = useState(false);
+  const [modalAction, setModalAction] = useState<"rename" | "remove" | null>(null);
+  const [targetType, setTargetType] = useState<string | null>(null);
+  const [modalInput, setModalInput] = useState("");
+
+  const openRename = (t: string) => {
+    setTargetType(t);
+    setModalAction("rename");
+    setModalInput(t);
+    setShowModal(true);
+  };
+
+  const openRemove = (t: string) => {
+    setTargetType(t);
+    setModalAction("remove");
+    setModalInput(t);
+    setShowModal(true);
+  };
+
+  const confirmModal = () => {
+    if (!modalAction || !targetType) return;
+    if (modalAction === "rename") {
+      renameType(targetType, modalInput);
+    } else if (modalAction === "remove") {
+      // perform removal
+      if (modalInput === targetType) {
+        removeType(targetType);
+      }
+    }
+    setShowModal(false);
+    setModalAction(null);
+    setTargetType(null);
+    setModalInput("");
+  };
+
 
   // --- Render type management UI ---
   const prettyRange = `${monday.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${
@@ -457,31 +600,80 @@ function WeeklyTracker({
           <Button variant="secondary" onClick={() => onReset()} className="bg-white hover:bg-slate-50">
             <RefreshCw className="mr-2 h-4 w-4" /> New Week
           </Button>
+          <Button variant="outline" onClick={async () => {
+            // copy previous week from Firestore if signed in
+            const uid = auth.currentUser?.uid;
+            if (!uid) { alert('Sign in to copy previous week'); return; }
+            const prevMonday = new Date(monday);
+            prevMonday.setDate(monday.getDate() - 7);
+            const prevISO = toISO(prevMonday);
+            try {
+              const ref = doc(db, 'users', uid, 'state', prevISO);
+              const snap = await getDoc(ref);
+              if (!snap.exists()) { alert('No saved data for previous week'); return; }
+              const data = snap.data() as PersistedState;
+              if (data?.weekly) {
+                setWeekly({ ...weekly, benchmarks: data.weekly.benchmarks, customTypes: data.weekly.customTypes });
+                saveGlobalTypes(data.weekly.customTypes || []);
+                // persist to current week doc
+                await setDoc(doc(db, 'users', uid, 'state', weekly.weekOfISO), { weekly: { ...weekly, benchmarks: data.weekly.benchmarks, customTypes: data.weekly.customTypes } }, { merge: true });
+                alert('Copied previous week settings');
+              }
+            } catch (e) { console.error('Copy previous week failed', e); alert('Failed to copy previous week'); }
+          }}>Copy previous week</Button>
         </div>
       </CardHeader>
+      {/* Weekly table */}
+      
+
+      {/* Manage types (moved lower and collapsed) */}
       <CardContent>
-        <div className="mb-4">
-          <h4 className="text-sm font-semibold mb-2">Manage workout types</h4>
-          <div className="flex gap-2 items-center mb-2">
-            <Input value={newTypeName} onChange={(e) => setNewTypeName(e.target.value)} placeholder="New type name" />
-            <Button onClick={addType} className="ml-2"><Plus className="mr-2 h-4 w-4"/> Add Type</Button>
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm font-semibold mb-2">Manage workout types</summary>
+          <div className="mt-2">
+            <div className="flex gap-2 items-center mb-2">
+              <Input value={newTypeName} onChange={(e) => setNewTypeName(e.target.value)} placeholder="New type name" />
+              <Button onClick={addType} className="ml-2"><Plus className="mr-2 h-4 w-4"/> Add Type</Button>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {weekly.customTypes.map((t) => (
+                <div key={t} className="flex items-center gap-2 bg-slate-100 px-2 py-1 rounded">
+                  <span className="text-sm font-medium">{t}</span>
+                  <button className="text-xs text-blue-600 hover:underline" onClick={() => openRename(t)}>Rename</button>
+                  <button className="text-xs text-red-600 hover:underline" onClick={() => openRemove(t)}>Remove</button>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="flex gap-2 flex-wrap">
-            {weekly.customTypes.map((t) => (
-              <div key={t} className="flex items-center gap-2 bg-slate-100 px-2 py-1 rounded">
-                <span className="text-sm font-medium">{t}</span>
-                <button className="text-xs text-blue-600 hover:underline" onClick={() => {
-                  const newName = prompt('Rename type', t);
-                  if (newName) renameType(t, newName);
-                }}>Rename</button>
-                <button className="text-xs text-red-600 hover:underline" onClick={() => {
-                  if (confirm(`Remove type "${t}"? This will clear it from all days.`)) removeType(t);
-                }}>Remove</button>
+        </details>
+      </CardContent>
+
+      {/* Modal for rename/remove */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-2">{modalAction === 'rename' ? 'Rename type' : 'Remove type'}</h3>
+            {modalAction === 'rename' ? (
+              <div className="space-y-2">
+                <Input value={modalInput} onChange={(e) => setModalInput(e.target.value)} />
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
+                  <Button onClick={confirmModal}>Save</Button>
+                </div>
               </div>
-            ))}
+            ) : (
+              <div className="space-y-4">
+                <p className="text-sm">Type the name of the type (<strong>{targetType}</strong>) to confirm removal.</p>
+                <Input value={modalInput} onChange={(e) => setModalInput(e.target.value)} />
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
+                  <Button variant="destructive" onClick={confirmModal}>Remove</Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
-      </CardContent>
+      )}
       <CardContent>
         <div className="overflow-x-auto">
           <table className="min-w-full border-separate border-spacing-0">
