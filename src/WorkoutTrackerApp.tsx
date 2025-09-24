@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, Check, RefreshCw, Save, Bookmark, Edit } from "lucide-react";
+import { Plus, Trash2, Check, RefreshCw, Save, Bookmark, Edit, Search, Dumbbell, Heart, User, Grid3X3 } from "lucide-react";
 import { ToastContainer } from "@/components/ui/toast";
 
 // --- Types ---
@@ -2129,88 +2129,334 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
 
   return (
     <div className="space-y-3">
-      {/* Composer */}
-      <Card>
-        <CardHeader>
+      {/* Modern Routine Builder */}
+      <Card className="bg-gradient-to-br from-slate-50 to-blue-50 border-blue-100 shadow-lg">
+        <CardHeader className="bg-white/50 backdrop-blur-sm">
           <div className="flex items-center justify-between">
             <div>
-              <div className="font-semibold">{editingId ? 'Edit Routine' : 'Routine Builder'}</div>
-                <div className="text-xs text-neutral-600">{editingId ? 'Editing existing routine' : 'Create routines or single exercises and save to your library'}</div>
+              <div className="flex items-center gap-2 mb-1">
+                <div className={cn(
+                  "p-2 rounded-lg",
+                  editingId ? "bg-orange-100 text-orange-700" : "bg-blue-100 text-blue-700"
+                )}>
+                  {editingId ? <Edit className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                </div>
+                <h2 className="font-bold text-xl text-gray-900">
+                  {editingId ? 'Edit Routine' : 'Routine Builder'}
+                </h2>
+              </div>
+              <p className="text-sm text-gray-600">
+                {editingId ? 'Editing existing routine' : 'Create routines or single exercises and save to your library'}
+              </p>
             </div>
-            <div className="flex gap-2">
-                <select value={composerKind} onChange={(e)=>setComposerKind(e.target.value as any)} className="border rounded px-2 py-1">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <select 
+                  value={composerKind} 
+                  onChange={(e)=>setComposerKind(e.target.value as any)} 
+                  className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
                   <option value="routine">Workout (routine)</option>
                   <option value="exercise">Single exercise</option>
                 </select>
-                <label className="flex items-center gap-2"><input type="checkbox" checked={composerPublic} onChange={(e)=>setComposerPublic(e.target.checked)} /> Public</label>
-                <label className="flex items-center gap-2"><input type="checkbox" checked={composerFavorite} onChange={(e)=>setComposerFavorite(e.target.checked)} /> Favorite</label>
-                <Button variant="outline" onClick={resetComposer}>Clear</Button>
-                <Button onClick={saveComposerAsRoutine}>{editingId ? 'Update' : 'Save'}</Button>
+              </div>
+              <div className="flex items-center gap-3 text-sm">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={composerPublic} 
+                    onChange={(e)=>setComposerPublic(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                  /> 
+                  <span className="text-gray-700">Public</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={composerFavorite} 
+                    onChange={(e)=>setComposerFavorite(e.target.checked)}
+                    className="w-4 h-4 text-yellow-600 bg-white border-gray-300 rounded focus:ring-yellow-500 focus:ring-2"
+                  /> 
+                  <span className="text-gray-700">Favorite</span>
+                </label>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={resetComposer} size="sm" className="hover:bg-gray-50">
+                  Clear
+                </Button>
+                <Button 
+                  onClick={saveComposerAsRoutine} 
+                  size="sm"
+                  className={cn(
+                    "shadow-sm",
+                    editingId 
+                      ? "bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700"
+                      : "bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700"
+                  )}
+                >
+                  {editingId ? 'Update' : 'Save'}
+                </Button>
+              </div>
             </div>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-2">
-            <Input placeholder="Routine name" value={composerName} onChange={(e) => setComposerName(e.target.value)} />
-            {saveMessage && (
-              <div className="text-sm text-green-600 mt-2">{saveMessage}</div>
-            )}
-            <div className="space-y-2">
-              {composerExercises.map((ex, idx) => (
-                <div key={ex.id} className="flex gap-2 items-center">
-                  <Input value={ex.name} placeholder="New exercise" onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], name: e.target.value }; return c; })} />
-                  <Input type="number" value={String(ex.minSets)} onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], minSets: Math.max(1, parseInt(e.target.value||'1')) }; return c; })} className="w-20" />
-                  <Input type="number" value={String(ex.targetReps)} onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], targetReps: Math.max(1, parseInt(e.target.value||'1')) }; return c; })} className="w-20" />
-                  <Button variant="destructive" onClick={() => setComposerExercises(prev => prev.filter(p => p.id !== ex.id))}>Remove</Button>
-                </div>
-              ))}
-              <Button onClick={addComposerExercise}>Add exercise</Button>
+        <CardContent className="space-y-4">
+          <div className="relative">
+            <Input 
+              placeholder={composerKind === 'routine' ? "Routine name (e.g., Upper Body Strength)" : "Exercise name"}
+              value={composerName} 
+              onChange={(e) => setComposerName(e.target.value)}
+              className="text-lg font-medium bg-white border-gray-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
+          
+          {saveMessage && (
+            <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+              <Check className="h-4 w-4 text-green-600" />
+              <span className="text-sm text-green-700 font-medium">{saveMessage}</span>
             </div>
+          )}
+          
+          <div className="space-y-3">
+            {composerExercises.map((ex, idx) => (
+              <div key={ex.id} className="flex gap-3 items-center p-3 bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-colors">
+                <div className="flex-1">
+                  <Input 
+                    value={ex.name} 
+                    placeholder="New exercise" 
+                    onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], name: e.target.value }; return c; })}
+                    className="font-medium border-0 bg-transparent p-0 focus:ring-0"
+                  />
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <span>Sets:</span>
+                  <Input 
+                    type="number" 
+                    value={String(ex.minSets)} 
+                    onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], minSets: Math.max(1, parseInt(e.target.value||'1')) }; return c; })} 
+                    className="w-16 text-center border-gray-200"
+                  />
+                  <span>Reps:</span>
+                  <Input 
+                    type="number" 
+                    value={String(ex.targetReps)} 
+                    onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], targetReps: Math.max(1, parseInt(e.target.value||'1')) }; return c; })} 
+                    className="w-16 text-center border-gray-200"
+                  />
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => setComposerExercises(prev => prev.filter(p => p.id !== ex.id))}
+                  className="text-gray-400 hover:text-red-500 hover:bg-red-50 shrink-0"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            <Button 
+              onClick={addComposerExercise} 
+              variant="outline" 
+              className="w-full border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-gray-600 hover:text-blue-600"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Exercise
+            </Button>
           </div>
         </CardContent>
       </Card>
-      <div className="flex items-center gap-2">
-        <select value={filter} onChange={(e)=>setFilter(e.target.value as any)} className="border rounded px-2 py-1">
-          <option value="all">All</option>
-          <option value="exercise">Exercise</option>
-          <option value="workout">Workout</option>
-          <option value="type">Type</option>
-          <option value="user">User</option>
-        </select>
-  <Input placeholder="filter query" value={filterQuery} onChange={(e)=>setFilterQuery(e.target.value)} />
-        <Button variant="outline" onClick={() => loadList()}>Filter</Button>
+      {/* Modern Filter Interface */}
+      <div className="space-y-4">
+        {/* Category Tabs */}
+        <div className="flex flex-wrap gap-2">
+          {[
+            { key: 'all', label: 'All Items', icon: Grid3X3 },
+            { key: 'workout', label: 'Workouts', icon: Dumbbell },
+            { key: 'exercise', label: 'Exercises', icon: Plus },
+            { key: 'user', label: 'My Content', icon: User },
+          ].map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => {setFilter(key as any); loadList();}}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200",
+                filter === key
+                  ? "bg-blue-100 text-blue-700 shadow-md"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200 hover:shadow-sm"
+              )}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </button>
+          ))}
+          {auth.currentUser && (
+            <button
+              onClick={() => {setFilter('all' as any); setFilterQuery(''); loadList(); /* TODO: filter by favorites */}}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200",
+                "bg-yellow-100 text-yellow-700 hover:bg-yellow-200 hover:shadow-sm"
+              )}
+            >
+              <Heart className="h-4 w-4" />
+              Favorites
+            </button>
+          )}
+        </div>
+        
+        {/* Modern Search Bar */}
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input 
+            placeholder="Search workouts and exercises..." 
+            value={filterQuery} 
+            onChange={(e) => setFilterQuery(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && loadList()}
+            className="pl-10 bg-white border-gray-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+          />
+        </div>
       </div>
 
       {loading ? (
-        <div>Loading routines...</div>
+        <div className="space-y-4">
+          {[...Array(3)].map((_, i) => (
+            <Card key={i} className="animate-pulse">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-gray-200 rounded-lg"></div>
+                    <div className="space-y-2">
+                      <div className="w-32 h-4 bg-gray-200 rounded"></div>
+                      <div className="w-24 h-3 bg-gray-200 rounded"></div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="w-16 h-8 bg-gray-200 rounded"></div>
+                    <div className="w-20 h-8 bg-gray-200 rounded"></div>
+                  </div>
+                </div>
+              </CardHeader>
+            </Card>
+          ))}
+        </div>
       ) : items.length === 0 ? (
-        <div className="text-sm text-neutral-600">No routines yet. Use the Routine Builder above to add exercises or workouts.</div>
+        <Card className="text-center py-12">
+          <CardContent>
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
+                <Dumbbell className="h-8 w-8 text-gray-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900 mb-2">No workouts yet</h3>
+                <p className="text-gray-600 max-w-sm">
+                  Start building your workout library using the Routine Builder above, or browse public workouts from other users.
+                </p>
+              </div>
+              <Button 
+                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Create Your First Workout
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       ) : (
         items.map((it) => (
-        <Card key={it.id}>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-semibold">{it.name}</div>
-                <div className="text-xs text-neutral-600">{(it.exercises || []).length} exercises</div>
-                <div className="text-xs text-neutral-500">{it.public ? 'Public' : 'Private'} {it.ownerName ? <span className="block text-[10px] text-neutral-400">{it.ownerName}</span> : it.owner ? <span className="block text-[10px] text-neutral-400">{it.owner}</span> : null}</div>
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={() => {
-                  const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
-                  onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id });
-                }}>Load</Button>
-                <Button onClick={() => {
-                  const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
-                  onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id }, 'append');
-                }} title="Append to current session">Append</Button>
-                {/* Edit button - only show for routines owned by current user */}
-                {auth.currentUser?.uid && it.owner === auth.currentUser.uid && (it.kind === 'routine' || !it.kind) && (
-                  <Button variant="outline" onClick={() => editRoutine(it)} title="Edit routine">
-                    <Edit className="h-4 w-4" />
-                  </Button>
+        <Card key={it.id} className="group hover:shadow-lg transition-all duration-300 border-0 bg-gradient-to-br from-white to-gray-50 hover:from-blue-50 hover:to-indigo-50">
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className={cn(
+                    "p-2 rounded-lg shrink-0",
+                    (it.kind === 'exercise' || it.exercises?.length === 1) 
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-blue-100 text-blue-700"
+                  )}>
+                    {(it.kind === 'exercise' || it.exercises?.length === 1) 
+                      ? <Dumbbell className="h-4 w-4" />
+                      : <Grid3X3 className="h-4 w-4" />
+                    }
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-semibold text-lg text-gray-900 truncate group-hover:text-blue-900 transition-colors">
+                      {it.name}
+                    </h3>
+                    <div className="flex items-center gap-4 mt-1">
+                      <span className="text-sm text-gray-600 flex items-center gap-1">
+                        <Plus className="h-3 w-3" />
+                        {(it.exercises || []).length} exercises
+                      </span>
+                      {it.favorite && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs font-medium rounded-full">
+                          <Heart className="h-3 w-3 fill-current" />
+                          Favorite
+                        </span>
+                      )}
+                      <span className={cn(
+                        "inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full",
+                        it.public 
+                          ? "bg-green-100 text-green-700" 
+                          : "bg-gray-100 text-gray-600"
+                      )}>
+                        {it.public ? 'Public' : 'Private'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                {it.ownerName && (
+                  <div className="flex items-center gap-1 mt-2 text-xs text-gray-500">
+                    <User className="h-3 w-3" />
+                    {it.ownerName}
+                  </div>
                 )}
-                <Button variant="outline" onClick={async ()=>{
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                <div className="flex gap-2">
+                  <Button 
+                    size="sm"
+                    onClick={() => {
+                      const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
+                      onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id });
+                    }}
+                    className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-sm"
+                  >
+                    Load
+                  </Button>
+                  <Button 
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
+                      onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id }, 'append');
+                    }} 
+                    title="Append to current session"
+                    className="border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-300"
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Append
+                  </Button>
+                </div>
+                
+                <div className="flex gap-1">
+                  {/* Edit button - only show for routines owned by current user */}
+                  {auth.currentUser?.uid && it.owner === auth.currentUser.uid && (it.kind === 'routine' || !it.kind) && (
+                    <Button 
+                      size="sm"
+                      variant="ghost" 
+                      onClick={() => editRoutine(it)} 
+                      title="Edit routine"
+                      className="text-gray-600 hover:text-blue-600 hover:bg-blue-50"
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                  )}
+                  
+                  <Button 
+                    size="sm"
+                    variant="ghost" 
+                    onClick={async ()=>{
                   const uid = auth.currentUser?.uid; if (!uid) return toasts.push('Sign in', 'info');
                   const itemType = (it.kind||'routine');
                   const favId = `${itemType}::${it.id}`;
@@ -2246,16 +2492,53 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
                   } finally {
                     setPendingFavorites(prev => { const n = new Set(prev); n.delete(favId); return n; });
                   }
-                }} title="Toggle favorite" disabled={pendingFavorites.has(`${it.kind||'routine'}::${it.id}`)}>
-                  <Bookmark className={cn('h-4 w-4', it.favorite && 'text-yellow-500')} />
-                </Button>
-                <Button variant="outline" onClick={() => { setRenameTarget(it); setRenameValue(it.name); setShowRenameModal(true); }}>Rename</Button>
-                <Button variant="destructive" onClick={() => { setDeleteTarget(it); setShowDeleteModal(true); }}>Delete</Button>
+                }} title="Toggle favorite" disabled={pendingFavorites.has(`${it.kind||'routine'}::${it.id}`)}
+                    className={cn(
+                      "hover:bg-yellow-50",
+                      it.favorite ? "text-yellow-500 hover:text-yellow-600" : "text-gray-400 hover:text-yellow-500"
+                    )}
+                  >
+                    <Bookmark className={cn('h-4 w-4', it.favorite && 'fill-current')} />
+                  </Button>
+                  
+                  {/* Show rename/delete only for owned items */}
+                  {auth.currentUser?.uid && it.owner === auth.currentUser.uid && (
+                    <>
+                      <Button 
+                        size="sm"
+                        variant="ghost" 
+                        onClick={() => { setRenameTarget(it); setRenameValue(it.name); setShowRenameModal(true); }}
+                        className="text-gray-400 hover:text-gray-600 hover:bg-gray-50"
+                        title="Rename"
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button 
+                        size="sm"
+                        variant="ghost" 
+                        onClick={() => { setDeleteTarget(it); setShowDeleteModal(true); }}
+                        className="text-gray-400 hover:text-red-500 hover:bg-red-50"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="text-sm">{(it.sessionTypes || []).join(', ')}</div>
+          <CardContent className="pt-0">
+            <div className="flex flex-wrap gap-2">
+              {(it.sessionTypes || []).map((type: string, idx: number) => (
+                <span key={idx} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                  {type}
+                </span>
+              ))}
+              {(it.sessionTypes || []).length === 0 && (
+                <span className="text-sm text-gray-400 italic">No session types</span>
+              )}
+            </div>
           </CardContent>
         </Card>
         ))
