@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, Check, RefreshCw, Save, Bookmark, Edit, Search, Dumbbell, Heart, User, Grid3X3 } from "lucide-react";
+import { Plus, Trash2, Check, RefreshCw, Save, Bookmark, Edit, Search, Dumbbell, Heart, User, Grid3X3, Target } from "lucide-react";
 import { ToastContainer } from "@/components/ui/toast";
 
 // --- Types ---
@@ -2029,45 +2029,162 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
         let data: any[] = [];
         try {
           if (filter === 'exercise') {
+            // Load public standalone exercises
             const cg = query(collectionGroup(db, 'exercises'), where('public', '==', true));
             const publicSnaps = await getDocs(cg);
             data = publicSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'exercise' }));
-          } else {
+            
+            // Also extract exercises from public routines
+            const cgRoutines = query(collectionGroup(db, 'routines'), where('public', '==', true));
+            const publicRoutineSnaps = await getDocs(cgRoutines);
+            publicRoutineSnaps.docs.forEach(d => {
+              const routine = d.data() as any;
+              (routine.exercises || []).forEach((ex: any) => {
+                data.push({
+                  id: `${d.id}_${ex.name}`, // unique id for extracted exercise
+                  name: ex.name,
+                  minSets: ex.minSets,
+                  targetReps: ex.targetReps,
+                  kind: 'exercise',
+                  owner: d.ref.parent.parent?.id || 'unknown',
+                  parentRoutine: routine.name,
+                  public: true,
+                  createdAt: routine.createdAt
+                });
+              });
+            });
+          } else if (filter === 'workout') {
+            // Load only public routines
             const cg = query(collectionGroup(db, 'routines'), where('public', '==', true));
             const publicSnaps = await getDocs(cg);
             data = publicSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
+          } else {
+            // Load all public content
+            const cgEx = query(collectionGroup(db, 'exercises'), where('public', '==', true));
+            const publicExSnaps = await getDocs(cgEx);
+            data = publicExSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'exercise' }));
+            
+            const cgRt = query(collectionGroup(db, 'routines'), where('public', '==', true));
+            const publicRtSnaps = await getDocs(cgRt);
+            const routines = publicRtSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
+            data = [...data, ...routines];
           }
         } catch (e) { console.warn('Failed to load public items', e); }
         setItems(data.sort((a,b)=> (b.createdAt||0)-(a.createdAt||0)));
         setLoading(false);
         return;
       }
+      
       let data: any[] = [];
+      
       if (filter === 'exercise') {
-        // load exercises
+        // Load standalone exercises
         const ref = collection(db, 'users', uid, 'exercises');
         const snaps = await getDocs(ref);
         data = snaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: uid, kind: 'exercise' }));
-        // include public exercises from other users
+        
+        // Extract individual exercises from user's routines
+        const routinesRef = collection(db, 'users', uid, 'routines');
+        const routineSnaps = await getDocs(routinesRef);
+        routineSnaps.docs.forEach(d => {
+          const routine = d.data() as any;
+          (routine.exercises || []).forEach((ex: any) => {
+            data.push({
+              id: `${d.id}_${ex.name}`, // unique id for extracted exercise
+              name: ex.name,
+              minSets: ex.minSets,
+              targetReps: ex.targetReps,
+              kind: 'exercise',
+              owner: uid,
+              parentRoutine: routine.name,
+              public: routine.public || false,
+              createdAt: routine.createdAt
+            });
+          });
+        });
+        
+        // Include public exercises from other users
         try {
           const cg = query(collectionGroup(db, 'exercises'), where('public', '==', true));
           const publicSnaps = await getDocs(cg);
           const pub = publicSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'exercise' }));
           for (const p of pub) if (p.owner !== uid) data.push(p);
+          
+          // Also get exercises from public routines
+          const cgRoutines = query(collectionGroup(db, 'routines'), where('public', '==', true));
+          const publicRoutineSnaps = await getDocs(cgRoutines);
+          publicRoutineSnaps.docs.forEach(d => {
+            if ((d.ref.parent.parent?.id || 'unknown') !== uid) {
+              const routine = d.data() as any;
+              (routine.exercises || []).forEach((ex: any) => {
+                data.push({
+                  id: `${d.id}_${ex.name}`,
+                  name: ex.name,
+                  minSets: ex.minSets,
+                  targetReps: ex.targetReps,
+                  kind: 'exercise',
+                  owner: d.ref.parent.parent?.id || 'unknown',
+                  parentRoutine: routine.name,
+                  public: true,
+                  createdAt: routine.createdAt
+                });
+              });
+            }
+          });
         } catch (e) { console.warn('Failed to load public exercises', e); }
-      } else {
-        // load user's routines
+        
+      } else if (filter === 'workout') {
+        // Load only workout routines (not individual exercises)
         const ref = collection(db, 'users', uid, 'routines');
         const snaps = await getDocs(ref);
         data = snaps.docs.map((d) => ({ id: d.id, ...(d.data() as any), owner: uid, kind: 'routine' }));
-        // also load public routines from other users (collection group)
+        
+        // Also load public routines from other users
         try {
           const cg = query(collectionGroup(db, 'routines'), where('public', '==', true));
           const publicSnaps = await getDocs(cg);
           const pub = publicSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
           for (const p of pub) if (p.owner !== uid) data.push(p);
         } catch (e) {
-          console.warn('Failed to load public routines collectionGroup', e);
+          console.warn('Failed to load public routines', e);
+        }
+        
+      } else if (filter === 'user') {
+        // Load only user's own content
+        const refEx = collection(db, 'users', uid, 'exercises');
+        const snapsEx = await getDocs(refEx);
+        const exercises = snapsEx.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: uid, kind: 'exercise' }));
+        
+        const refRt = collection(db, 'users', uid, 'routines');
+        const snapsRt = await getDocs(refRt);
+        const routines = snapsRt.docs.map((d) => ({ id: d.id, ...(d.data() as any), owner: uid, kind: 'routine' }));
+        
+        data = [...exercises, ...routines];
+        
+      } else {
+        // Load all content (both routines and standalone exercises)
+        const refEx = collection(db, 'users', uid, 'exercises');
+        const snapsEx = await getDocs(refEx);
+        data = snapsEx.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: uid, kind: 'exercise' }));
+        
+        const refRt = collection(db, 'users', uid, 'routines');
+        const snapsRt = await getDocs(refRt);
+        const routines = snapsRt.docs.map((d) => ({ id: d.id, ...(d.data() as any), owner: uid, kind: 'routine' }));
+        data = [...data, ...routines];
+        
+        // Also load public content from other users
+        try {
+          const cgEx = query(collectionGroup(db, 'exercises'), where('public', '==', true));
+          const publicExSnaps = await getDocs(cgEx);
+          const pubEx = publicExSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'exercise' }));
+          for (const p of pubEx) if (p.owner !== uid) data.push(p);
+          
+          const cgRt = query(collectionGroup(db, 'routines'), where('public', '==', true));
+          const publicRtSnaps = await getDocs(cgRt);
+          const pubRt = publicRtSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
+          for (const p of pubRt) if (p.owner !== uid) data.push(p);
+        } catch (e) {
+          console.warn('Failed to load public content', e);
         }
       }
       // annotate with whether current user favorited each item (favorites stored per-user)
@@ -2272,7 +2389,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
           {[
             { key: 'all', label: 'All Items', icon: Grid3X3 },
             { key: 'workout', label: 'Workouts', icon: Dumbbell },
-            { key: 'exercise', label: 'Exercises', icon: Plus },
+            { key: 'exercise', label: 'Exercises', icon: Target },
             { key: 'user', label: 'My Content', icon: User },
           ].map(({ key, label, icon: Icon }) => (
             <button
@@ -2384,10 +2501,27 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
                       {it.name}
                     </h3>
                     <div className="flex items-center gap-4 mt-1">
-                      <span className="text-sm text-gray-600 flex items-center gap-1">
-                        <Plus className="h-3 w-3" />
-                        {(it.exercises || []).length} exercises
-                      </span>
+                      {it.kind === 'exercise' && !it.parentRoutine ? (
+                        <span className="text-sm text-gray-600 flex items-center gap-1">
+                          <Target className="h-3 w-3" />
+                          {it.minSets || 3} sets × {it.targetReps || 8} reps
+                        </span>
+                      ) : it.kind === 'exercise' && it.parentRoutine ? (
+                        <span className="text-sm text-gray-600 flex items-center gap-1">
+                          <Target className="h-3 w-3" />
+                          {it.minSets || 3} sets × {it.targetReps || 8} reps
+                        </span>
+                      ) : (
+                        <span className="text-sm text-gray-600 flex items-center gap-1">
+                          <Plus className="h-3 w-3" />
+                          {(it.exercises || []).length} exercises
+                        </span>
+                      )}
+                      {it.parentRoutine && (
+                        <span className="inline-flex items-center px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">
+                          from {it.parentRoutine}
+                        </span>
+                      )}
                       {it.favorite && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs font-medium rounded-full">
                           <Heart className="h-3 w-3 fill-current" />
@@ -2413,35 +2547,53 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
                 )}
               </div>
               <div className="flex flex-col sm:flex-row gap-2 shrink-0">
-                <div className="flex gap-2">
-                  <Button 
-                    size="sm"
-                    onClick={() => {
-                      const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
-                      onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id });
-                    }}
-                    className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-sm"
-                  >
-                    Load
-                  </Button>
-                  <Button 
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
-                      onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id }, 'append');
-                    }} 
-                    title="Append to current session"
-                    className="border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-300"
-                  >
-                    <Plus className="h-3 w-3 mr-1" />
-                    Append
-                  </Button>
-                </div>
+                {/* Only show Load/Append for full routines, not individual exercises */}
+                {it.kind === 'routine' ? (
+                  <div className="flex gap-2">
+                    <Button 
+                      size="sm"
+                      onClick={() => {
+                        const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
+                        onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id });
+                      }}
+                      className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-sm"
+                    >
+                      Load
+                    </Button>
+                    <Button 
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
+                        onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id }, 'append');
+                      }} 
+                      title="Append to current session"
+                      className="border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-300"
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Append
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Button 
+                      size="sm"
+                      onClick={() => {
+                        // For individual exercises, add them to current session
+                        const exercise = { id: crypto.randomUUID(), name: it.name, minSets: it.minSets || 3, targetReps: it.targetReps || 8, sets: Array(it.minSets || 3).fill(0) };
+                        onLoadRoutine({ dateISO: toISO(new Date()), sessionName: 'Current Session', exercises: [exercise], completed: false, sessionTypes: [], durationSec: 0 }, 'append');
+                      }}
+                      className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-sm"
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add to Workout
+                    </Button>
+                  </div>
+                )}
                 
                 <div className="flex gap-1">
                   {/* Edit button - only show for routines owned by current user */}
-                  {auth.currentUser?.uid && it.owner === auth.currentUser.uid && (it.kind === 'routine' || !it.kind) && (
+                  {auth.currentUser?.uid && it.owner === auth.currentUser.uid && it.kind === 'routine' && (
                     <Button 
                       size="sm"
                       variant="ghost" 
