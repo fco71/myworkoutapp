@@ -633,6 +633,17 @@ export default function WorkoutTrackerApp() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 text-slate-900 p-6">
+      {/* Mindfulness overlay when weekly Mindfulness goal met */}
+      {(() => {
+        try {
+          const target = weekly.benchmarks?.['Mindfulness'] || 0;
+          const count = weekly.days.reduce((acc, d) => acc + (d.types?.['Mindfulness'] ? 1 : 0), 0);
+          if (target > 0 && count >= target) {
+            return <div className="fixed inset-0 z-40 mindfulness-overlay pointer-events-none"></div>;
+          }
+        } catch (e) { /* ignore */ }
+        return null;
+      })()}
       <div className="mx-auto max-w-6xl">
   <ToastContainer messages={appToasts.messages} onDismiss={appToasts.dismiss} />
         <header className="mb-8">
@@ -1237,6 +1248,7 @@ function WorkoutView({
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerSec, setTimerSec] = useState<number>(session.durationSec || 0);
   const [routines, setRoutines] = useState<any[]>([]);
+  const [newTaskName, setNewTaskName] = useState("");
   const [showLoadModal, setShowLoadModal] = useState(false);
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
   const [sessionFavorited, setSessionFavorited] = useState<boolean>(false);
@@ -1591,6 +1603,16 @@ function WorkoutView({
         <Button onClick={addExercise}>
           <Plus className="mr-2 h-4 w-4" /> Add exercise
         </Button>
+        <div className="flex items-center">
+          <Input placeholder="Add task (e.g., Practice guitar)" value={newTaskName} onChange={(e)=>setNewTaskName(e.target.value)} className="w-64" />
+          <Button onClick={() => {
+            const name = (newTaskName||"").trim();
+            if (!name) return;
+            const task = { id: crypto.randomUUID(), name, minSets: 0, targetReps: 0, sets: [], isTask: true } as any;
+            setSession({ ...session, exercises: [...session.exercises, task] });
+            setNewTaskName("");
+          }} className="ml-2">Add task</Button>
+        </div>
         <Button variant="outline" onClick={loadRoutines}>
           Load Routine
         </Button>
