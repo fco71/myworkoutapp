@@ -2077,7 +2077,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
     (window as any).__app_favorites_cache = { map: new Set() };
   }, []);
 
-  const [filter, setFilter] = useState<'all'|'exercise'|'workout'|'type'|'user'>('all');
+  const [filter, setFilter] = useState<'all'|'exercise'|'workout'|'type'|'user'|'favorites'>('all');
   const [filterQuery, setFilterQuery] = useState('');
   const [pendingFavorites, setPendingFavorites] = useState<Set<string>>(new Set());
 
@@ -2287,6 +2287,12 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
       // Favorites will be handled by the real-time listener to prevent race conditions
       // Initialize items with favorite: false, the listener will update them
       data = data.map(it => ({ ...it, favorite: false }));
+      
+      // For favorites filter, filter by favorited items
+      if (filter === 'favorites') {
+        const currentFavs = (window as any).__app_favorites_cache?.map || new Set();
+        data = data.filter(it => currentFavs.has(`${it.kind||'routine'}::${it.id}`));
+      }
       // basic filtering
       if (filter !== 'all') {
         console.log('[Library] Applying filter:', filter, 'with query:', filterQuery);
@@ -2511,6 +2517,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
             { key: 'workout', label: 'Workouts', icon: Dumbbell },
             { key: 'exercise', label: 'Exercises', icon: Target },
             { key: 'user', label: 'My Content', icon: User },
+            { key: 'favorites', label: 'Favorites', icon: Bookmark },
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
