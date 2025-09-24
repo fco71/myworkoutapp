@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, Check, RefreshCw, Save, Bookmark } from "lucide-react";
+import { Plus, Trash2, Check, RefreshCw, Save, Bookmark, Edit } from "lucide-react";
 import { ToastContainer } from "@/components/ui/toast";
 
 // --- Types ---
@@ -1382,7 +1382,7 @@ function WorkoutView({
       ...session,
       exercises: [
         ...session.exercises,
-        { id: crypto.randomUUID(), name: "New exercise", minSets: 3, targetReps: 6, sets: [0, 0, 0] },
+        { id: crypto.randomUUID(), name: "", minSets: 3, targetReps: 6, sets: [0, 0, 0] },
       ],
     });
   };
@@ -1744,6 +1744,7 @@ function ExerciseCard({
           <Input
             value={ex.name}
             onChange={(e) => updateExercise(ex.id, { name: e.target.value })}
+            placeholder="New exercise"
             className="max-w-xs"
           />
           <div className="flex items-center gap-2 text-sm">
@@ -1944,7 +1945,27 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
 
   const resetComposer = () => { setComposerName(''); setComposerExercises([]); setEditingId(null); };
 
-  const addComposerExercise = () => setComposerExercises(prev => [...prev, { id: crypto.randomUUID(), name: 'New exercise', minSets: 3, targetReps: 8, sets: [0,0,0] }]);
+  const addComposerExercise = () => setComposerExercises(prev => [...prev, { id: crypto.randomUUID(), name: '', minSets: 3, targetReps: 8, sets: [0,0,0] }]);
+
+  const editRoutine = (routine: any) => {
+    // Only allow editing routines (not individual exercises) and only if user owns them
+    const uid = auth.currentUser?.uid;
+    if (!uid || routine.owner !== uid || (routine.kind && routine.kind !== 'routine')) return;
+    
+    // Populate composer with routine data
+    setComposerName(routine.name);
+    setComposerExercises((routine.exercises || []).map((e: any) => ({
+      id: crypto.randomUUID(),
+      name: e.name,
+      minSets: e.minSets,
+      targetReps: e.targetReps,
+      sets: Array(e.minSets).fill(0)
+    })));
+    setEditingId(routine.id);
+    setComposerKind('routine');
+    setComposerPublic(!!routine.public);
+    setComposerFavorite(!!routine.favorite);
+  };
 
   const saveComposerAsRoutine = async () => {
     try {
@@ -2113,8 +2134,8 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <div className="font-semibold">Routine Builder</div>
-                <div className="text-xs text-neutral-600">Create routines or single exercises and save to your library</div>
+              <div className="font-semibold">{editingId ? 'Edit Routine' : 'Routine Builder'}</div>
+                <div className="text-xs text-neutral-600">{editingId ? 'Editing existing routine' : 'Create routines or single exercises and save to your library'}</div>
             </div>
             <div className="flex gap-2">
                 <select value={composerKind} onChange={(e)=>setComposerKind(e.target.value as any)} className="border rounded px-2 py-1">
@@ -2124,7 +2145,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
                 <label className="flex items-center gap-2"><input type="checkbox" checked={composerPublic} onChange={(e)=>setComposerPublic(e.target.checked)} /> Public</label>
                 <label className="flex items-center gap-2"><input type="checkbox" checked={composerFavorite} onChange={(e)=>setComposerFavorite(e.target.checked)} /> Favorite</label>
                 <Button variant="outline" onClick={resetComposer}>Clear</Button>
-                <Button onClick={saveComposerAsRoutine}>Save</Button>
+                <Button onClick={saveComposerAsRoutine}>{editingId ? 'Update' : 'Save'}</Button>
             </div>
           </div>
         </CardHeader>
@@ -2137,7 +2158,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
             <div className="space-y-2">
               {composerExercises.map((ex, idx) => (
                 <div key={ex.id} className="flex gap-2 items-center">
-                  <Input value={ex.name} onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], name: e.target.value }; return c; })} />
+                  <Input value={ex.name} placeholder="New exercise" onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], name: e.target.value }; return c; })} />
                   <Input type="number" value={String(ex.minSets)} onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], minSets: Math.max(1, parseInt(e.target.value||'1')) }; return c; })} className="w-20" />
                   <Input type="number" value={String(ex.targetReps)} onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], targetReps: Math.max(1, parseInt(e.target.value||'1')) }; return c; })} className="w-20" />
                   <Button variant="destructive" onClick={() => setComposerExercises(prev => prev.filter(p => p.id !== ex.id))}>Remove</Button>
@@ -2183,6 +2204,12 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
                   const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
                   onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id }, 'append');
                 }} title="Append to current session">Append</Button>
+                {/* Edit button - only show for routines owned by current user */}
+                {auth.currentUser?.uid && it.owner === auth.currentUser.uid && (it.kind === 'routine' || !it.kind) && (
+                  <Button variant="outline" onClick={() => editRoutine(it)} title="Edit routine">
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                )}
                 <Button variant="outline" onClick={async ()=>{
                   const uid = auth.currentUser?.uid; if (!uid) return toasts.push('Sign in', 'info');
                   const itemType = (it.kind||'routine');
