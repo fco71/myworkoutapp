@@ -1287,9 +1287,25 @@ function WorkoutView({
 
   useEffect(() => {
     // keep session.durationSec in sync while editing
-    setSession({ ...session, durationSec: timerSec });
+    // Guard so we don't overwrite the session when parent intentionally resets it
+    const currentDuration = session.durationSec || 0;
+    if (timerSec !== currentDuration) {
+      setSession({ ...session, durationSec: timerSec });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerSec]);
+
+  // If the parent resets the session (or its duration changes externally),
+  // make sure the local timerSec follows the incoming session prop instead
+  // of persisting the old timer value back into the parent.
+  useEffect(() => {
+    const incoming = session.durationSec || 0;
+    if (timerSec !== incoming) {
+      setTimerSec(incoming);
+    }
+    // only react to changes in the session's duration or identity-ish fields
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.durationSec, session.dateISO, session.completed]);
 
   // timer formatting handled inline where needed; removed helper to avoid unused warning
 
