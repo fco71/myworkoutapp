@@ -11,6 +11,7 @@ jobs:
     env:
       FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
       FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - name: Use Node.js 22.x
@@ -30,7 +31,7 @@ jobs:
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
-          repoToken: "${{ secrets.GITHUB_TOKEN }}"
+          repoToken: "${{ env.GITHUB_TOKEN }}"
           firebaseServiceAccount: "${{ env.FIREBASE_SERVICE_ACCOUNT }}"
           channelId: live
-          projectId: ${{ env.FIREBASE_PROJECT_ID }}
+          projectId: "${{ env.FIREBASE_PROJECT_ID }}"
