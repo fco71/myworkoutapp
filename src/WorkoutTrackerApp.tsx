@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, Check, Save, Bookmark, Edit, Search, Dumbbell, Heart, User, Grid3X3, Target } from "lucide-react";
+import { Plus, Trash2, Check, Save, Bookmark, Edit, Search, Dumbbell, User, Grid3X3, Target } from "lucide-react";
 import { ToastContainer } from "@/components/ui/toast";
 
 // --- Types ---
@@ -2291,12 +2291,8 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
       // For favorites filter, filter by favorited items
       if (filter === 'favorites') {
         const currentFavs = (window as any).__app_favorites_cache?.map || new Set();
-        console.log('[Library] Favorites filter - cache has', currentFavs.size, 'favorites:', Array.from(currentFavs));
-        console.log('[Library] Before favorites filter:', data.length, 'items');
         data = data.filter(it => currentFavs.has(`${it.kind||'routine'}::${it.id}`));
-        console.log('[Library] After favorites filter:', data.length, 'items');
       }
-      
       console.log('[Library] Final setItems call with', data.length, 'items');
       const sortedData = data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       setItems(sortedData);
@@ -2332,7 +2328,6 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
               const data = d.data();
               favSet.add(`${data.itemType||'routine'}::${data.itemId}`);
             });
-            console.log('[Favorites Listener] Found', favSet.size, 'favorites:', Array.from(favSet));
             
             // Only update cache and items if something actually changed
             const currentCache = (window as any).__app_favorites_cache?.map;
@@ -2341,7 +2336,6 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
               Array.from(favSet).some(item => !currentCache.has(item));
               
             if (!hasChanged) return;
-            console.log('[Favorites Listener] Cache changed, updating...');
             
             (window as any).__app_favorites_cache.map = favSet;
             if (!mounted) return;
@@ -2530,18 +2524,6 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
               {label}
             </button>
           ))}
-          {auth.currentUser && (
-            <button
-              onClick={() => {setFilter('all' as any); setFilterQuery(''); loadList(); /* TODO: filter by favorites */}}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200",
-                "bg-yellow-100 text-yellow-700 hover:bg-yellow-200 hover:shadow-sm"
-              )}
-            >
-              <Heart className="h-4 w-4" />
-              Favorites
-            </button>
-          )}
         </div>
         
         {/* Modern Search Bar */}
@@ -2648,7 +2630,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
                       )}
                       {it.favorite && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs font-medium rounded-full">
-                          <Heart className="h-3 w-3 fill-current" />
+                          <Bookmark className="h-3 w-3 fill-current" />
                           Favorite
                         </span>
                       )}
