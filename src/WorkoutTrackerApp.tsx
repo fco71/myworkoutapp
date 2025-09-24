@@ -2156,53 +2156,12 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
     setLoading(true);
     try {
       const uid = auth.currentUser?.uid;
+      console.log('[Library] Loading list, uid:', uid, 'filter:', filter);
       if (!uid) {
         // Not signed in: surface public items only so the library isn't empty
-        let data: any[] = [];
-        try {
-          if (filter === 'exercise') {
-            // Load public standalone exercises
-            const cg = query(collectionGroup(db, 'exercises'), where('public', '==', true));
-            const publicSnaps = await getDocs(cg);
-            data = publicSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'exercise' }));
-            
-            // Also extract exercises from public routines
-            const cgRoutines = query(collectionGroup(db, 'routines'), where('public', '==', true));
-            const publicRoutineSnaps = await getDocs(cgRoutines);
-            publicRoutineSnaps.docs.forEach(d => {
-              const routine = d.data() as any;
-              (routine.exercises || []).forEach((ex: any) => {
-                data.push({
-                  id: `${d.id}_${ex.name}`, // unique id for extracted exercise
-                  name: ex.name,
-                  minSets: ex.minSets,
-                  targetReps: ex.targetReps,
-                  kind: 'exercise',
-                  owner: d.ref.parent.parent?.id || 'unknown',
-                  parentRoutine: routine.name,
-                  public: true,
-                  createdAt: routine.createdAt
-                });
-              });
-            });
-          } else if (filter === 'workout') {
-            // Load only public routines
-            const cg = query(collectionGroup(db, 'routines'), where('public', '==', true));
-            const publicSnaps = await getDocs(cg);
-            data = publicSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
-          } else {
-            // Load all public content
-            const cgEx = query(collectionGroup(db, 'exercises'), where('public', '==', true));
-            const publicExSnaps = await getDocs(cgEx);
-            data = publicExSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'exercise' }));
-            
-            const cgRt = query(collectionGroup(db, 'routines'), where('public', '==', true));
-            const publicRtSnaps = await getDocs(cgRt);
-            const routines = publicRtSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
-            data = [...data, ...routines];
-          }
-        } catch (e) { console.warn('Failed to load public items', e); }
-        setItems(data.sort((a,b)=> (b.createdAt||0)-(a.createdAt||0)));
+        // For now, show empty state with helpful message instead of failing collection group queries
+        console.log('[Library] Not signed in, showing empty state for now');
+        setItems([]);
         setLoading(false);
         return;
       }
@@ -2319,26 +2278,29 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
           console.warn('Failed to load public content', e);
         }
       }
-      // annotate with whether current user favorited each item (favorites stored per-user)
-      // annotate with whether current user favorited each item (only when signed in)
-      try {
-        const favSnaps = await getDocs(collection(db, 'users', uid, 'favorites'));
-        const favs = favSnaps.docs.map(d => d.data() as any);
-        const favSet = new Set(favs.map((f:any)=> `${f.itemType||'routine'}::${f.itemId}`));
-        // write to global cache
-        (window as any).__app_favorites_cache.map = favSet;
-        data = data.map(it => ({ ...it, favorite: favSet.has(`${it.kind||'routine'}::${it.id}`) }));
-      } catch (e) {
-        console.warn('Failed to load favorites for user', e);
-      }
+      // Favorites will be handled by the real-time listener to prevent race conditions
+      // Initialize items with favorite: false, the listener will update them
+      data = data.map(it => ({ ...it, favorite: false }));
       // basic filtering
       if (filter !== 'all') {
+        console.log('[Library] Applying filter:', filter, 'with query:', filterQuery);
         if (filter === 'exercise') data = data.filter(it => (it.name||it.exercises?.map((e:any)=>e.name).join(' ')||'').toLowerCase().includes(filterQuery.toLowerCase()));
         if (filter === 'workout') data = data.filter(it => (it.name||'').toLowerCase().includes(filterQuery.toLowerCase()));
         if (filter === 'type') data = data.filter(it => (it.sessionTypes||[]).some((t:string)=> t.toLowerCase().includes(filterQuery.toLowerCase())));
         if (filter === 'user') data = data.filter(it => ((it.ownerName||it.owner)||'').toLowerCase().includes(filterQuery.toLowerCase()));
+        console.log('[Library] After filtering:', data.length, 'items remain');
       }
-      setItems(data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+      console.log('[Library] Final setItems call with', data.length, 'items');
+      const sortedData = data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      setItems(sortedData);
+      
+      // Allow the favorites listener a moment to update the items
+      if (auth.currentUser?.uid) {
+        setTimeout(() => {
+          const currentFavs = (window as any).__app_favorites_cache?.map || new Set();
+          setItems(prev => prev.map(it => ({ ...it, favorite: currentFavs.has(`${it.kind||'routine'}::${it.id}`) })));
+        }, 100);
+      }
     } catch (e) {
       console.error('Load routines list failed', e);
     } finally { setLoading(false); }
@@ -2351,7 +2313,13 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
     let unsub: any = null;
     let mounted = true;
     const uid = auth.currentUser?.uid;
-    if (!uid) return;
+    if (!uid) {
+      // Clear favorites for unsigned users
+      (window as any).__app_favorites_cache.map = new Set();
+      setItems(prev => prev.map(it => ({ ...it, favorite: false })));
+      return;
+    }
+    
     try {
       // subscribe to favorites collection and update items' favorite flags
       const col = collection(db, 'users', uid, 'favorites');
@@ -2366,7 +2334,12 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
             });
             (window as any).__app_favorites_cache.map = favSet;
             if (!mounted) return;
-            setItems(prev => prev.map(it => ({ ...it, favorite: favSet.has(`${it.kind||'routine'}::${it.id}`) })));
+            
+            // Only update if items exist to prevent flickering during initial load
+            setItems(prev => {
+              if (prev.length === 0) return prev;
+              return prev.map(it => ({ ...it, favorite: favSet.has(`${it.kind||'routine'}::${it.id}`) }));
+            });
           } catch (e) { console.warn('favorites snapshot handler failed', e); }
         });
       })();
@@ -2374,7 +2347,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
       console.warn('Failed to subscribe to favorites', e);
     }
     return () => { mounted = false; if (unsub && typeof unsub === 'function') unsub(); };
-  }, []);
+  }, [auth.currentUser?.uid]); // React to auth changes
 
   return (
     <div className="space-y-3">
@@ -2759,7 +2732,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
                   const initial = !!it.favorite;
                   const optimistic = prev.map(p => p.id === it.id ? { ...p, favorite: !initial } : p);
                   setItems(optimistic);
-                  setPendingFavorites(prev => new Set(prev).add(favId));
+                  setPendingFavorites(prevPending => new Set(prevPending).add(favId));
                   try {
                     const favRef = doc(db, 'users', uid, 'favorites', favId);
                     const favSnap = await getDoc(favRef);
@@ -2783,7 +2756,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
                     setItems(prev);
                     toasts.push('Failed to toggle favorite', 'error');
                   } finally {
-                    setPendingFavorites(prev => { const n = new Set(prev); n.delete(favId); return n; });
+                    setPendingFavorites(prevPending => { const n = new Set(prevPending); n.delete(favId); return n; });
                   }
                 }} title="Toggle favorite" disabled={pendingFavorites.has(`${it.kind||'routine'}::${it.id}`)}
                     className={cn(
