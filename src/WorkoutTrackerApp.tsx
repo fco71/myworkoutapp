@@ -2164,10 +2164,34 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
       const uid = auth.currentUser?.uid;
       console.log('[Library] Loading list, uid:', uid, 'filter:', filter);
       if (!uid) {
-        // Not signed in: surface public items only so the library isn't empty
-        // For now, show empty state with helpful message instead of failing collection group queries
-        console.log('[Library] Not signed in, showing empty state for now');
-        setItems([]);
+        // Not signed in: load public content only so new users can see the shared library
+        console.log('[Library] Not signed in, loading public content only');
+        let data: any[] = [];
+        try {
+          const cgEx = query(collectionGroup(db, 'exercises'), where('public', '==', true));
+          const publicExSnaps = await getDocs(cgEx);
+          const pubEx = publicExSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'exercise' }));
+          data = [...data, ...pubEx];
+          
+          const cgRt = query(collectionGroup(db, 'routines'), where('public', '==', true));
+          const publicRtSnaps = await getDocs(cgRt);
+          const pubRt = publicRtSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
+          data = [...data, ...pubRt];
+          
+          console.log('Unsigned user loaded', pubEx.length, 'public exercises and', pubRt.length, 'public routines');
+        } catch (e) {
+          console.error('Failed to load public content for unsigned user - INDEX ERROR:', e);
+        }
+        
+        // Apply favorites filter (will be empty for unsigned users)
+        data = data.map(it => ({ ...it, favorite: false }));
+        if (filter === 'favorites') {
+          data = []; // No favorites for unsigned users
+        }
+        
+        console.log('[Library] Final setItems call with', data.length, 'items');
+        const sortedData = data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        setItems(sortedData);
         setLoading(false);
         return;
       }
@@ -2280,8 +2304,9 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
           const publicRtSnaps = await getDocs(cgRt);
           const pubRt = publicRtSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
           for (const p of pubRt) if (p.owner !== uid) data.push(p);
+          console.log('Successfully loaded', pubEx.length, 'public exercises and', pubRt.length, 'public routines');
         } catch (e) {
-          console.warn('Failed to load public content', e);
+          console.error('Failed to load public content - this is the index error:', e);
         }
       }
       // Favorites will be handled by the real-time listener to prevent race conditions
