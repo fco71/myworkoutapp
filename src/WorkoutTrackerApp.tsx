@@ -305,6 +305,9 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
   const cardioCount = cleanedDays.reduce((acc, d) => {
     return acc + Object.keys(d.types || {}).filter(t => d.types[t] && (typeCats[t] === 'Cardio' || t === 'Bike' || t === 'Cardio')).length;
   }, 0);
+  const mindfulnessCount = cleanedDays.reduce((acc, d) => {
+    return acc + Object.keys(d.types || {}).filter(t => d.types[t] && (typeCats[t] === 'Mindfulness' || t === 'Mindfulness')).length;
+  }, 0);
 
   // debug: compute unique session ids across the week and show per-day details
     try {
@@ -324,8 +327,7 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
       {/* Week Number */}
       <div className="flex items-center justify-between">
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-lg shadow-lg">
-          <h2 className="text-2xl font-bold">Training Week {weekly.weekNumber}</h2>
-          <p className="text-blue-100 text-sm">Keep pushing your limits!</p>
+        <h2 className="text-2xl font-bold">Week {weekly.weekNumber}</h2>
         </div>
         <Button 
           variant="outline" 
@@ -339,7 +341,7 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
         </Button>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+  <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         {/* Today's Progress */}
         <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
           <CardContent className="p-6">
@@ -372,7 +374,7 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
         </CardContent>
       </Card>
 
-      {/* Resistance Progress */}
+  {/* Resistance Progress */}
       <Card className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white border-0 shadow-lg">
         <CardContent className="p-6">
           <div className="flex items-center justify-between">
@@ -403,6 +405,24 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
           </div>
         </CardContent>
       </Card>
+      {/* Mindfulness Progress */}
+      <Card className="bg-gradient-to-br from-emerald-300 to-emerald-400 text-white border-0 shadow-lg">
+        <CardContent className="p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-emerald-100 text-sm font-medium">Mindfulness</p>
+              <div className="flex items-center gap-2">
+                <p className="text-3xl font-bold">{mindfulnessCount}</p>
+                {/* inline info icon removed per request; tooltip is available in Manage types help */}
+              </div>
+              <p className="text-emerald-200 text-xs">Done this week</p>
+            </div>
+            <div className="w-12 h-12 bg-emerald-200 rounded-full flex items-center justify-center">
+              <span className="text-2xl">🧘</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
       </div>
     </div>
   );
@@ -421,6 +441,7 @@ export default function WorkoutTrackerApp() {
   const [password, setPassword] = useState("");
   // top-level toasts container for non-blocking messages
   const appToasts = useToasts();
+  // (celebration UI removed per user request)
 
   // keep a global favorites snapshot map to keep optimistic updates reconciled across components
   // This will be populated via a listener when a user signs in (see effect below in child components)
@@ -565,6 +586,10 @@ export default function WorkoutTrackerApp() {
     }
   }, [userId, weekly, session]);
 
+  // celebration and debug override removed
+
+  // confetti and celebration removed
+
   // ...existing code...
 
   // Global floating countdown timer
@@ -632,19 +657,34 @@ export default function WorkoutTrackerApp() {
   // resetSession removed — session resets are no longer part of UI flow
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 text-slate-900 p-6">
+  <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 text-slate-900 p-6 relative z-10">
       {/* Mindfulness overlay when weekly Mindfulness goal met */}
       {(() => {
         try {
           const target = weekly.benchmarks?.['Mindfulness'] || 0;
-          const count = weekly.days.reduce((acc, d) => acc + (d.types?.['Mindfulness'] ? 1 : 0), 0);
-          if (target > 0 && count >= target) {
+          // count types that are either explicitly named Mindfulness or categorized as Mindfulness
+          const typeCats = weekly.typeCategories || {};
+          const count = weekly.days.reduce((acc, d) => {
+            return acc + Object.keys(d.types || {}).filter(t => d.types?.[t] && (typeCats[t] === 'Mindfulness' || t === 'Mindfulness')).length;
+          }, 0);
+
+          // Debug override: allow forcing the overlay via URL param or localStorage key while testing
+          let force = false;
+          try {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('mindfulness_demo') === '1') force = true;
+            const ls = localStorage.getItem('mindfulness:demo');
+            if (!force && ls && (ls === '1' || ls === 'true')) force = true;
+          } catch (e) { /* ignore in non-browser env */ }
+
+          if (force || (target > 0 && count >= target)) {
             return <div className="fixed inset-0 z-40 mindfulness-overlay pointer-events-none"></div>;
           }
         } catch (e) { /* ignore */ }
         return null;
       })()}
       <div className="mx-auto max-w-6xl">
+        {/* celebration UI removed */}
   <ToastContainer messages={appToasts.messages} onDismiss={appToasts.dismiss} />
         <header className="mb-8">
           <div className="flex items-center justify-between mb-6">
@@ -826,6 +866,7 @@ function WeeklyTracker({
   push?: (text: string, kind?: 'info'|'success'|'error') => void;
 }) {
   const types = weekly.customTypes;
+  const [typesPanelOpen, setTypesPanelOpen] = useState(false);
 
   const counts = useMemo(() => {
     // Counts should mirror the header: simple checkbox counts only.
@@ -880,6 +921,8 @@ function WeeklyTracker({
       }
     })();
     setNewTypeName("");
+    // ensure the manage types panel is visible so users notice the new type
+    setTypesPanelOpen(true);
   };
 
   const removeType = (name: string) => {
@@ -1022,8 +1065,8 @@ function WeeklyTracker({
 
       {/* Manage types (moved lower and collapsed) */}
       <CardContent>
-        <details className="mt-4">
-          <summary className="cursor-pointer text-sm font-semibold mb-2">Manage workout types</summary>
+        <details className="mt-4" open={typesPanelOpen}>
+          <summary className="cursor-pointer text-sm font-semibold mb-2">Manage lifestyle types</summary>
           <div className="mt-2">
             <div className="flex gap-2 items-center mb-2">
               <Input value={newTypeName} onChange={(e) => setNewTypeName(e.target.value)} placeholder="New type name" />
@@ -1046,6 +1089,8 @@ function WeeklyTracker({
                     const updated = { ...weekly, typeCategories: updatedCats } as WeeklyPlan;
                     setWeekly(normalizeWeekly(updated));
                     saveGlobalTypes(updated.customTypes, updatedCats);
+                    // open the types panel so users discover categorization
+                    setTypesPanelOpen(true);
                     const uid = auth.currentUser?.uid;
                     if (uid) {
                       try { await setDoc(doc(db, 'users', uid, 'settings', 'types'), { categories: updatedCats, types: updated.customTypes }, { merge: true }); } catch (e) { console.warn('Failed to save categories to Firestore', e); }
@@ -1096,7 +1141,7 @@ function WeeklyTracker({
           <table className="min-w-full border-separate border-spacing-0">
             <thead>
               <tr>
-                <th className="sticky left-0 bg-white text-left p-2 border-b">Workout</th>
+                <th className="sticky left-0 bg-white text-left p-2 border-b">Type</th>
                 {weekly.days.map((d) => (
                   <th key={d.dateISO} className="p-2 text-xs font-medium border-b">
                     {new Date(d.dateISO + 'T00:00').toLocaleDateString(undefined, { weekday: "short" })}
@@ -1193,7 +1238,10 @@ function WeeklyTracker({
                       );
                     })}
                     <td className="p-2 border-b font-semibold">
-                      <span>{Math.min(7, counts[t])} <span className="text-[10px] text-neutral-500">days</span></span>
+                      {(() => {
+                        const n = Math.min(7, counts[t]);
+                        return <span>{n} <span className="text-[10px] text-neutral-500">{n === 1 ? 'day' : 'days'}</span></span>;
+                      })()}
                     </td>
                     <td className="p-2 border-b">
                       <div className="flex items-center gap-2">
@@ -1212,7 +1260,7 @@ function WeeklyTracker({
                             });
                           }}
                         />
-                        <span className="text-[10px] text-neutral-500">days</span>
+                        <span className="text-[10px] text-neutral-500">{(weekly.benchmarks[t] ?? 0) === 1 ? 'day' : 'days'}</span>
                         {hit && (
                           <span className="text-green-700 text-xs flex items-center gap-1">
                             <Check className="h-4 w-4" /> goal met
@@ -1248,7 +1296,6 @@ function WorkoutView({
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerSec, setTimerSec] = useState<number>(session.durationSec || 0);
   const [routines, setRoutines] = useState<any[]>([]);
-  const [newTaskName, setNewTaskName] = useState("");
   const [showLoadModal, setShowLoadModal] = useState(false);
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
   const [sessionFavorited, setSessionFavorited] = useState<boolean>(false);
@@ -1603,16 +1650,6 @@ function WorkoutView({
         <Button onClick={addExercise}>
           <Plus className="mr-2 h-4 w-4" /> Add exercise
         </Button>
-        <div className="flex items-center">
-          <Input placeholder="Add task (e.g., Practice guitar)" value={newTaskName} onChange={(e)=>setNewTaskName(e.target.value)} className="w-64" />
-          <Button onClick={() => {
-            const name = (newTaskName||"").trim();
-            if (!name) return;
-            const task = { id: crypto.randomUUID(), name, minSets: 0, targetReps: 0, sets: [], isTask: true } as any;
-            setSession({ ...session, exercises: [...session.exercises, task] });
-            setNewTaskName("");
-          }} className="ml-2">Add task</Button>
-        </div>
         <Button variant="outline" onClick={loadRoutines}>
           Load Routine
         </Button>
