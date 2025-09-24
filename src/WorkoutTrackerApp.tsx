@@ -2071,6 +2071,12 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
   const [composerPublic, setComposerPublic] = useState(false);
   const [composerFavorite, setComposerFavorite] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  // Initialize favorites cache on component mount
+  useEffect(() => {
+    // Clear any stale cache from previous sessions
+    (window as any).__app_favorites_cache = { map: new Set() };
+  }, []);
+
   const [filter, setFilter] = useState<'all'|'exercise'|'workout'|'type'|'user'>('all');
   const [filterQuery, setFilterQuery] = useState('');
   const [pendingFavorites, setPendingFavorites] = useState<Set<string>>(new Set());
@@ -2293,14 +2299,6 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
       console.log('[Library] Final setItems call with', data.length, 'items');
       const sortedData = data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       setItems(sortedData);
-      
-      // Allow the favorites listener a moment to update the items
-      if (auth.currentUser?.uid) {
-        setTimeout(() => {
-          const currentFavs = (window as any).__app_favorites_cache?.map || new Set();
-          setItems(prev => prev.map(it => ({ ...it, favorite: currentFavs.has(`${it.kind||'routine'}::${it.id}`) })));
-        }, 100);
-      }
     } catch (e) {
       console.error('Load routines list failed', e);
     } finally { setLoading(false); }
@@ -2315,9 +2313,9 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
     let updateTimeout: number | null = null;
     const uid = auth.currentUser?.uid;
     if (!uid) {
-      // Clear favorites for unsigned users
-      (window as any).__app_favorites_cache.map = new Set();
-      setItems(prev => prev.map(it => ({ ...it, favorite: false })));
+      // Clear favorites for unsigned users and reset items to prevent blinking
+      (window as any).__app_favorites_cache = { map: new Set() };
+      setItems([]);
       return;
     }
     
@@ -2333,14 +2331,23 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
               const data = d.data();
               favSet.add(`${data.itemType||'routine'}::${data.itemId}`);
             });
+            
+            // Only update cache and items if something actually changed
+            const currentCache = (window as any).__app_favorites_cache?.map;
+            const hasChanged = !currentCache || 
+              favSet.size !== currentCache.size || 
+              Array.from(favSet).some(item => !currentCache.has(item));
+              
+            if (!hasChanged) return;
+            
             (window as any).__app_favorites_cache.map = favSet;
             if (!mounted) return;
             
-            // Debounce updates to prevent rapid-fire favorites changes
+            // Debounce updates and only apply if items exist
             if (updateTimeout) clearTimeout(updateTimeout);
             updateTimeout = setTimeout(() => {
               setItems(prev => {
-                if (prev.length === 0) return prev;
+                if (prev.length === 0) return prev; // Don't update empty lists to prevent blinking
                 return prev.map(it => ({ ...it, favorite: favSet.has(`${it.kind||'routine'}::${it.id}`) }));
               });
             }, 150);
