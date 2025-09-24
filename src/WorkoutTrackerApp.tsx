@@ -102,9 +102,9 @@ function defaultWeekly(): WeeklyPlan {
     weekNumber: 1,
     days,
     // default weekly benchmarks (editable per week)
-    benchmarks: { Bike: 3, Calves: 4, Resistance: 2, Cardio: 2, Mobility: 2, Other: 1 },
-  customTypes: ["Bike", "Calves", "Rings"],
-  typeCategories: { Bike: 'Cardio', Calves: 'None', Rings: 'Resistance' },
+    benchmarks: { Bike: 3, Calves: 4, Resistance: 2, Cardio: 2, Mobility: 2, Other: 1, Mindfulness: 3 },
+  customTypes: ["Bike", "Calves", "Rings", "Mindfulness"],
+  typeCategories: { Bike: 'Cardio', Calves: 'None', Rings: 'Resistance', Mindfulness: 'Mindfulness' },
   };
 }
 
@@ -629,7 +629,7 @@ export default function WorkoutTrackerApp() {
       setWeekly(base);
     }
   };
-  const resetSession = () => setSession(defaultSession());
+  // resetSession removed — session resets are no longer part of UI flow
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 text-slate-900 p-6">
@@ -639,7 +639,7 @@ export default function WorkoutTrackerApp() {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                Workout Tracker
+                Lifestyle Tracker
               </h1>
               <p className="text-slate-600 mt-2">Track your fitness journey with precision</p>
             </div>
@@ -677,7 +677,7 @@ export default function WorkoutTrackerApp() {
           </TabsContent>
 
           <TabsContent value="workout" className="mt-4">
-            <WorkoutView session={session} setSession={setSession} onReset={resetSession} weekly={weekly} setWeekly={setWeekly} />
+            <WorkoutView session={session} setSession={setSession} weekly={weekly} setWeekly={setWeekly} />
           </TabsContent>
 
           <TabsContent value="history" className="mt-4">
@@ -1224,13 +1224,11 @@ function WeeklyTracker({
 function WorkoutView({
   session,
   setSession,
-  onReset,
   weekly,
   setWeekly,
 }: {
   session: ResistanceSession;
   setSession: (s: ResistanceSession) => void;
-  onReset: () => void;
   weekly: WeeklyPlan;
   setWeekly: (w: WeeklyPlan) => void;
 }) {
@@ -1599,15 +1597,7 @@ function WorkoutView({
         <Button variant="secondary" onClick={saveRoutine}>
           <Save className="mr-2 h-4 w-4"/> Save Routine
         </Button>
-        <Button variant="secondary" onClick={() => {
-          // Ensure child-local state is cleared before/after parent resets
-          setTimerRunning(false);
-          setTimerSec(0);
-          try { onReset(); } catch (e) { console.warn('onReset failed', e); }
-          toasts.push('New session started', 'info');
-        }}>
-          <RefreshCw className="mr-2 h-4 w-4" /> New session
-        </Button>
+        {/* 'New session' removed for Lifestyle Tracker flow */}
         {!session.completed && (
           <Button 
             onClick={completeWorkout}
