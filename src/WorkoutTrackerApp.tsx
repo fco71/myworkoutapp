@@ -1599,7 +1599,13 @@ function WorkoutView({
         <Button variant="secondary" onClick={saveRoutine}>
           <Save className="mr-2 h-4 w-4"/> Save Routine
         </Button>
-        <Button variant="secondary" onClick={onReset}>
+        <Button variant="secondary" onClick={() => {
+          // Ensure child-local state is cleared before/after parent resets
+          setTimerRunning(false);
+          setTimerSec(0);
+          try { onReset(); } catch (e) { console.warn('onReset failed', e); }
+          toasts.push('New session started', 'info');
+        }}>
           <RefreshCw className="mr-2 h-4 w-4" /> New session
         </Button>
         {!session.completed && (
