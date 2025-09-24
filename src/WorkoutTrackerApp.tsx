@@ -1,12 +1,12 @@
 import { useMemo, useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { doc, getDoc, setDoc, collection, addDoc, getDocs, deleteDoc, query, where, collectionGroup } from "firebase/firestore";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, Check, RefreshCw, Save, Bookmark, Edit, Search, Dumbbell, Heart, User, Grid3X3, Target } from "lucide-react";
+import { Plus, Trash2, Check, Save, Bookmark, Edit, Search, Dumbbell, Heart, User, Grid3X3, Target } from "lucide-react";
 import { ToastContainer } from "@/components/ui/toast";
 
 // --- Types ---
@@ -102,9 +102,9 @@ function defaultWeekly(): WeeklyPlan {
     weekNumber: 1,
     days,
     // default weekly benchmarks (editable per week)
-    benchmarks: { Bike: 3, Calves: 4, Resistance: 2, Cardio: 2, Mobility: 2, Other: 1, Mindfulness: 3 },
-  customTypes: ["Bike", "Calves", "Rings", "Mindfulness"],
-  typeCategories: { Bike: 'Cardio', Calves: 'None', Rings: 'Resistance', Mindfulness: 'Mindfulness' },
+    benchmarks: { Bike: 3, "Row Machine": 3, "Piano Practice": 4, Mindfulness: 3 },
+  customTypes: ["Bike", "Row Machine", "Piano Practice", "Mindfulness"],
+  typeCategories: { Bike: 'Cardio', "Row Machine": 'Cardio', "Piano Practice": 'Skills', Mindfulness: 'Mindfulness' },
   };
 }
 
@@ -329,16 +329,6 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-lg shadow-lg">
         <h2 className="text-2xl font-bold">Week {weekly.weekNumber}</h2>
         </div>
-        <Button 
-          variant="outline" 
-          onClick={() => {
-            // Reset week number - this would need to be passed as a prop
-            console.log("Reset week number");
-          }}
-          className="bg-white/80 hover:bg-white"
-        >
-          Reset Week
-        </Button>
       </div>
       
   <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
@@ -626,34 +616,7 @@ export default function WorkoutTrackerApp() {
 
   // (debugging removed) -- no console.debug left
 
-  const resetWeek = async () => {
-    const base = defaultWeekly();
-    const uid = auth.currentUser?.uid;
-    if (!uid) {
-      setWeekly(normalizeWeekly(base));
-      return;
-    }
-    try {
-      const monday = getMonday();
-      const prev = new Date(monday);
-      prev.setDate(monday.getDate() - 7);
-      const prevISO = toISO(prev);
-      const ref = doc(db, 'users', uid, 'state', prevISO);
-      const snap = await getDoc(ref);
-      if (!snap.exists()) {
-        setWeekly(normalizeWeekly(base));
-        return;
-      }
-      const data = snap.data() as PersistedState;
-      const weeklyFromPrev = data.weekly || ({} as WeeklyPlan);
-      const benchmarks = { ...base.benchmarks, ...(weeklyFromPrev.benchmarks || {}) } as Record<string, number>;
-      const customTypes = ensureUniqueTypes([...(weeklyFromPrev.customTypes || base.customTypes)]);
-      setWeekly(normalizeWeekly({ ...base, benchmarks, customTypes } as WeeklyPlan));
-    } catch (e) {
-      console.warn('Failed to copy previous week on reset', e);
-      setWeekly(base);
-    }
-  };
+
   // resetSession removed — session resets are no longer part of UI flow
 
   return (
@@ -724,7 +687,7 @@ export default function WorkoutTrackerApp() {
           </TabsList>
 
       <TabsContent value="week" className="mt-4">
-  <WeeklyTracker weekly={weekly} setWeekly={setWeekly} onReset={resetWeek} push={appToasts.push} />
+  <WeeklyTracker weekly={weekly} setWeekly={setWeekly} push={appToasts.push} />
           </TabsContent>
 
           <TabsContent value="workout" className="mt-4">
@@ -837,6 +800,54 @@ export default function WorkoutTrackerApp() {
                   Cancel
                 </Button>
               </div>
+              
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-white px-2 text-muted-foreground">Or continue with</span>
+                </div>
+              </div>
+              
+              <div className="grid gap-2">
+                <Button
+                  variant="outline"
+                  className="w-full bg-white hover:bg-gray-50 border-gray-300 text-gray-700 font-medium py-3"
+                  onClick={async () => {
+                    try {
+                      const provider = new GoogleAuthProvider();
+                      await signInWithPopup(auth, provider);
+                      setShowSignIn(false);
+                      setEmail("");
+                      setPassword("");
+                      setIsSignUp(false);
+                    } catch (e) {
+                      console.error("Google auth failed:", e);
+                    }
+                  }}
+                >
+                  <svg className="mr-3 h-5 w-5" viewBox="0 0 24 24">
+                    <path
+                      fill="#4285F4"
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    />
+                    <path
+                      fill="#FBBC04"
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                    />
+                  </svg>
+                  <span className="text-sm">Continue with Google</span>
+                </Button>
+              </div>
               <div className="text-center">
                 <button
                   className="text-sm text-blue-600 hover:underline"
@@ -857,16 +868,15 @@ export default function WorkoutTrackerApp() {
 function WeeklyTracker({
   weekly,
   setWeekly,
-  onReset,
   push,
 }: {
   weekly: WeeklyPlan;
   setWeekly: (w: WeeklyPlan) => void;
-  onReset: () => void;
   push?: (text: string, kind?: 'info'|'success'|'error') => void;
 }) {
   const types = weekly.customTypes;
   const [typesPanelOpen, setTypesPanelOpen] = useState(false);
+  const [editTypeModal, setEditTypeModal] = useState<{ type: string; name: string; category: string } | null>(null);
 
   const counts = useMemo(() => {
     // Counts should mirror the header: simple checkbox counts only.
@@ -1022,9 +1032,6 @@ function WeeklyTracker({
           <p className="text-sm text-slate-600">Click cells to toggle what you did each day.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={() => onReset()} className="bg-white hover:bg-slate-50">
-            <RefreshCw className="mr-2 h-4 w-4" /> New Week
-          </Button>
           <Button variant="outline" onClick={async () => {
             // copy previous week from Firestore if signed in
             const uid = auth.currentUser?.uid;
@@ -1136,6 +1143,86 @@ function WeeklyTracker({
           </div>
         </div>
       )}
+
+      {/* Edit Type Modal */}
+      {editTypeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">Edit Workout Type</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Type Name</label>
+                <Input 
+                  value={editTypeModal.name} 
+                  onChange={(e) => setEditTypeModal({ ...editTypeModal, name: e.target.value })} 
+                  placeholder="Enter type name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Category</label>
+                <select 
+                  value={editTypeModal.category} 
+                  onChange={(e) => setEditTypeModal({ ...editTypeModal, category: e.target.value })}
+                  className="w-full border rounded px-3 py-2"
+                >
+                  <option value="None">None</option>
+                  <option value="Cardio">Cardio</option>
+                  <option value="Resistance">Resistance</option>
+                  <option value="Mindfulness">Mindfulness</option>
+                  <option value="Skills">Skills</option>
+                </select>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setEditTypeModal(null)}>Cancel</Button>
+                <Button onClick={() => {
+                  const originalType = editTypeModal.type;
+                  const newName = editTypeModal.name.trim();
+                  const newCategory = editTypeModal.category;
+                  
+                  if (!newName) return;
+                  
+                  const newBenchmarks = { ...weekly.benchmarks };
+                  const newCustomTypes = [...(weekly.customTypes || [])];
+                  const newCategories = { ...weekly.typeCategories };
+                  
+                  if (newName !== originalType) {
+                    // Name changed - transfer benchmark and update all references
+                    newBenchmarks[newName] = newBenchmarks[originalType] || 0;
+                    delete newBenchmarks[originalType];
+                    
+                    // Update custom types
+                    const idx = newCustomTypes.indexOf(originalType);
+                    if (idx >= 0) newCustomTypes[idx] = newName;
+                    
+                    // Update all day types
+                    const newDays = weekly.days.map(d => {
+                      if (d.types[originalType]) {
+                        const newTypes = { ...d.types };
+                        newTypes[newName] = true;
+                        delete newTypes[originalType];
+                        return { ...d, types: newTypes };
+                      }
+                      return d;
+                    });
+                    
+                    // Update categories
+                    newCategories[newName] = newCategory;
+                    delete newCategories[originalType];
+                    
+                    setWeekly({ ...weekly, days: newDays, benchmarks: newBenchmarks, customTypes: newCustomTypes, typeCategories: newCategories });
+                  } else {
+                    // Only category changed
+                    newCategories[originalType] = newCategory;
+                    setWeekly({ ...weekly, typeCategories: newCategories });
+                  }
+                  
+                  setEditTypeModal(null);
+                }}>Save Changes</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <CardContent>
         <div className="overflow-x-auto">
           <table className="min-w-full border-separate border-spacing-0">
@@ -1158,7 +1245,52 @@ function WeeklyTracker({
                 const hit = counts[t] >= (weekly.benchmarks[t] ?? 0);
                 return (
                   <tr key={t} className="">
-                    <td className="sticky left-0 bg-white p-2 font-medium border-b">{t}</td>
+                    <td className="sticky left-0 bg-white p-2 font-medium border-b">
+                      <div className="flex items-center justify-between">
+                        <span className={hit ? 'text-green-700' : ''}>{t}</span>
+                        <div className="flex gap-1 opacity-60 hover:opacity-100">
+                          <Button 
+                            size="sm" 
+                            variant="ghost" 
+                            className="h-5 w-5 p-0 hover:bg-blue-100" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditTypeModal({
+                                type: t,
+                                name: t,
+                                category: weekly.typeCategories?.[t] || 'None'
+                              });
+                            }}
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="ghost" 
+                            className="h-5 w-5 p-0 hover:bg-red-100" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (confirm(`Remove "${t}" type and all its data?`)) {
+                                const newBenchmarks = { ...weekly.benchmarks };
+                                delete newBenchmarks[t];
+                                const newCustomTypes = weekly.customTypes?.filter(ct => ct !== t) || [];
+                                const newCategories = { ...weekly.typeCategories };
+                                delete newCategories[t];
+                                // Remove from all days
+                                const newDays = weekly.days.map(d => {
+                                  const newTypes = { ...d.types };
+                                  delete newTypes[t];
+                                  return { ...d, types: newTypes };
+                                });
+                                setWeekly({ ...weekly, days: newDays, benchmarks: newBenchmarks, customTypes: newCustomTypes, typeCategories: newCategories });
+                              }
+                            }}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    </td>
                     {weekly.days.map((d, idx) => {
                       const active = !!d.types[t];
                       return (
@@ -2549,45 +2681,54 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
               <div className="flex flex-col sm:flex-row gap-2 shrink-0">
                 {/* Only show Load/Append for full routines, not individual exercises */}
                 {it.kind === 'routine' ? (
-                  <div className="flex gap-2">
-                    <Button 
-                      size="sm"
-                      onClick={() => {
-                        const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
-                        onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id });
-                      }}
-                      className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-sm"
-                    >
-                      Load
-                    </Button>
-                    <Button 
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
-                        onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id }, 'append');
-                      }} 
-                      title="Append to current session"
-                      className="border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-300"
-                    >
-                      <Plus className="h-3 w-3 mr-1" />
-                      Append
-                    </Button>
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-blue-600 uppercase tracking-wide">Full Workout Routine</div>
+                    <div className="flex gap-2">
+                      <Button 
+                        size="sm"
+                        onClick={() => {
+                          const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
+                          onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id });
+                        }}
+                        className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-sm"
+                        title="Replace current workout with this routine"
+                      >
+                        <Grid3X3 className="h-3 w-3 mr-1" />
+                        Start This Workout
+                      </Button>
+                      <Button 
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
+                          onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id }, 'append');
+                        }} 
+                        title="Add all exercises from this routine to current workout"
+                        className="border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-300"
+                      >
+                        <Plus className="h-3 w-3 mr-1" />
+                        Add All Exercises
+                      </Button>
+                    </div>
                   </div>
                 ) : (
-                  <div className="flex gap-2">
-                    <Button 
-                      size="sm"
-                      onClick={() => {
-                        // For individual exercises, add them to current session
-                        const exercise = { id: crypto.randomUUID(), name: it.name, minSets: it.minSets || 3, targetReps: it.targetReps || 8, sets: Array(it.minSets || 3).fill(0) };
-                        onLoadRoutine({ dateISO: toISO(new Date()), sessionName: 'Current Session', exercises: [exercise], completed: false, sessionTypes: [], durationSec: 0 }, 'append');
-                      }}
-                      className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-sm"
-                    >
-                      <Plus className="h-3 w-3 mr-1" />
-                      Add to Workout
-                    </Button>
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-emerald-600 uppercase tracking-wide">Single Exercise</div>
+                    <div className="flex gap-2">
+                      <Button 
+                        size="sm"
+                        onClick={() => {
+                          // For individual exercises, add them to current session
+                          const exercise = { id: crypto.randomUUID(), name: it.name, minSets: it.minSets || 3, targetReps: it.targetReps || 8, sets: Array(it.minSets || 3).fill(0) };
+                          onLoadRoutine({ dateISO: toISO(new Date()), sessionName: 'Current Session', exercises: [exercise], completed: false, sessionTypes: [], durationSec: 0 }, 'append');
+                        }}
+                        className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-sm"
+                        title="Add this single exercise to your current workout"
+                      >
+                        <Target className="h-3 w-3 mr-1" />
+                        Add Exercise
+                      </Button>
+                    </div>
                   </div>
                 )}
                 
