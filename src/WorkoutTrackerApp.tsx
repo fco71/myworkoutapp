@@ -2312,6 +2312,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
   useEffect(() => {
     let unsub: any = null;
     let mounted = true;
+    let updateTimeout: number | null = null;
     const uid = auth.currentUser?.uid;
     if (!uid) {
       // Clear favorites for unsigned users
@@ -2335,18 +2336,25 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
             (window as any).__app_favorites_cache.map = favSet;
             if (!mounted) return;
             
-            // Only update if items exist to prevent flickering during initial load
-            setItems(prev => {
-              if (prev.length === 0) return prev;
-              return prev.map(it => ({ ...it, favorite: favSet.has(`${it.kind||'routine'}::${it.id}`) }));
-            });
+            // Debounce updates to prevent rapid-fire favorites changes
+            if (updateTimeout) clearTimeout(updateTimeout);
+            updateTimeout = setTimeout(() => {
+              setItems(prev => {
+                if (prev.length === 0) return prev;
+                return prev.map(it => ({ ...it, favorite: favSet.has(`${it.kind||'routine'}::${it.id}`) }));
+              });
+            }, 150);
           } catch (e) { console.warn('favorites snapshot handler failed', e); }
         });
       })();
     } catch (e) {
       console.warn('Failed to subscribe to favorites', e);
     }
-    return () => { mounted = false; if (unsub && typeof unsub === 'function') unsub(); };
+    return () => { 
+      mounted = false; 
+      if (updateTimeout) clearTimeout(updateTimeout);
+      if (unsub && typeof unsub === 'function') unsub(); 
+    };
   }, [auth.currentUser?.uid]); // React to auth changes
 
   return (
@@ -2795,16 +2803,19 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="flex flex-wrap gap-2">
-              {(it.sessionTypes || []).map((type: string, idx: number) => (
-                <span key={idx} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
-                  {type}
-                </span>
-              ))}
-              {(it.sessionTypes || []).length === 0 && (
-                <span className="text-sm text-gray-400 italic">No session types</span>
-              )}
-            </div>
+            {/* Only show session types for routines, not individual exercises */}
+            {it.kind === 'routine' && (
+              <div className="flex flex-wrap gap-2">
+                {(it.sessionTypes || []).map((type: string, idx: number) => (
+                  <span key={idx} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                    {type}
+                  </span>
+                ))}
+                {(it.sessionTypes || []).length === 0 && (
+                  <span className="text-sm text-gray-400 italic">No session types</span>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
         ))
