@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, Check, Save, Bookmark, Edit, Search, Dumbbell, User, Grid3X3, Target } from "lucide-react";
+import { Plus, Trash2, Check, Save, Bookmark, Edit, Search, Dumbbell, User, Grid3X3, Target, ChevronDown, Settings, LogOut } from "lucide-react";
 import { ToastContainer } from "@/components/ui/toast";
 
 // --- Types ---
@@ -424,8 +424,26 @@ export default function WorkoutTrackerApp() {
   const [session, setSession] = useState<ResistanceSession>(defaultSession());
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
+  const [editingUsername, setEditingUsername] = useState(false);
+  const [tempUsername, setTempUsername] = useState('');
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [showSignIn, setShowSignIn] = useState(false);
+
+  // Username and profile management
+  const updateUsername = async (newUsername: string) => {
+    if (!userId || !newUsername.trim()) return;
+    try {
+      const profileRef = doc(db, 'users', userId, 'profile', 'info');
+      await setDoc(profileRef, { username: newUsername.trim() }, { merge: true });
+      setUserName(newUsername.trim());
+      setEditingUsername(false);
+      appToasts.push('Username updated', 'success');
+    } catch (e) {
+      console.error('Failed to update username:', e);
+      appToasts.push('Failed to update username', 'error');
+    }
+  };
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -437,7 +455,7 @@ export default function WorkoutTrackerApp() {
   // This will be populated via a listener when a user signs in (see effect below in child components)
   // Exposed via a simple ref-like object pattern (we attach to window for quick debug in dev)
   // Note: we don't persist anything here; this is an app-level cache to avoid stale optimistic UI.
-  (window as any).__app_favorites_cache = (window as any).__app_favorites_cache || { map: new Map<string, boolean>() };
+  (window as any).__app_favorites_cache = (window as any).__app_favorites_cache || { map: new Set<string>() };
 
   // Offline cache is configured at Firestore initialization in lib/firebase
 
@@ -447,7 +465,27 @@ export default function WorkoutTrackerApp() {
       try {
         if (u) {
           setUserId(u.uid);
-          setUserName(u.displayName || u.email || null);
+          // Load username from Firestore profile, fallback to display name or default
+          try {
+            const profileRef = doc(db, 'users', u.uid, 'profile', 'info');
+            const profileSnap = await getDoc(profileRef);
+            if (profileSnap.exists() && profileSnap.data().username) {
+              const loadedUsername = profileSnap.data().username;
+              console.debug('Loaded username from Firestore:', loadedUsername);
+              setUserName(loadedUsername);
+            } else {
+              // No username set yet, use display name as default and save it
+              const defaultUsername = u.displayName || u.email?.split('@')[0] || 'User';
+              console.debug('No saved username, using default:', defaultUsername);
+              setUserName(defaultUsername);
+              await setDoc(profileRef, { username: defaultUsername, email: u.email }, { merge: true });
+              console.debug('Saved default username to Firestore');
+            }
+          } catch (e) {
+            console.warn('Failed to load username, using fallback:', e);
+            const fallbackUsername = u.displayName || u.email?.split('@')[0] || 'User';
+            setUserName(fallbackUsername);
+          }
           // Prefer per-week document keyed by weekOfISO. Fall back to the legacy 'tracker' doc.
           try {
             const weekRef = doc(db, 'users', u.uid, 'state', toISO(getMonday()));
@@ -660,10 +698,107 @@ export default function WorkoutTrackerApp() {
             <div className="flex gap-2">
               {userId ? (
                 <>
-                  <span className="text-sm text-slate-600 hidden sm:inline">{userName || "Signed in"}</span>
-                  <Button variant="secondary" onClick={() => signOut(auth)}>
-                    Sign out
-                  </Button>
+                  {/* User Dropdown Menu */}
+                  <div className="relative">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowUserDropdown(!showUserDropdown)}
+                      className="flex items-center gap-2 text-slate-700 hover:text-slate-900 hover:bg-slate-50"
+                    >
+                      <User className="h-4 w-4" />
+                      <span className="hidden sm:inline">{userName || "User"}</span>
+                      <ChevronDown className="h-3 w-3" />
+                    </Button>
+                    
+                    {showUserDropdown && (
+                      <>
+                        {/* Backdrop to close dropdown when clicking outside */}
+                        <div 
+                          className="fixed inset-0 z-10" 
+                          onClick={() => setShowUserDropdown(false)}
+                        />
+                        
+                        {/* Dropdown Menu */}
+                        <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg border border-slate-200 shadow-lg z-20">
+                          <div className="py-2">
+                            {/* Profile Section */}
+                            <div className="px-4 py-2 border-b border-slate-100">
+                              <p className="text-sm font-medium text-slate-900">{userName || "User"}</p>
+                              <p className="text-xs text-slate-500">{auth.currentUser?.email}</p>
+                            </div>
+                            
+                            {/* Settings Option */}
+                            <button
+                              onClick={() => {
+                                setTempUsername(userName || '');
+                                setEditingUsername(true);
+                                setShowUserDropdown(false);
+                              }}
+                              className="w-full px-4 py-2 text-sm text-left text-slate-700 hover:bg-slate-50 flex items-center gap-3"
+                            >
+                              <Settings className="h-4 w-4" />
+                              Edit Profile
+                            </button>
+                            
+                            {/* Log Out Option */}
+                            <button
+                              onClick={() => {
+                                setShowUserDropdown(false);
+                                signOut(auth);
+                              }}
+                              className="w-full px-4 py-2 text-sm text-left text-slate-700 hover:bg-slate-50 flex items-center gap-3"
+                            >
+                              <LogOut className="h-4 w-4" />
+                              Log out
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  
+                  {/* Username Edit Modal */}
+                  {editingUsername && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                      <div className="bg-white rounded-lg p-6 w-full max-w-sm">
+                        <h3 className="text-lg font-semibold mb-4">Edit Profile</h3>
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium mb-2">Username</label>
+                            <Input
+                              value={tempUsername}
+                              onChange={(e) => setTempUsername(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  updateUsername(tempUsername);
+                                } else if (e.key === 'Escape') {
+                                  setEditingUsername(false);
+                                  setTempUsername('');
+                                }
+                              }}
+                              placeholder="Enter your username"
+                              autoFocus
+                            />
+                          </div>
+                          <div className="flex justify-end gap-2">
+                            <Button 
+                              variant="outline"
+                              onClick={() => {
+                                setEditingUsername(false);
+                                setTempUsername('');
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                            <Button onClick={() => updateUsername(tempUsername)}>
+                              Save
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </>
               ) : (
                 <Button variant="secondary" onClick={() => setShowSignIn(true)}>
@@ -691,7 +826,7 @@ export default function WorkoutTrackerApp() {
           </TabsContent>
 
           <TabsContent value="workout" className="mt-4">
-            <WorkoutView session={session} setSession={setSession} weekly={weekly} setWeekly={setWeekly} />
+            <WorkoutView session={session} setSession={setSession} weekly={weekly} setWeekly={setWeekly} userName={userName} />
           </TabsContent>
 
           <TabsContent value="history" className="mt-4">
@@ -699,7 +834,7 @@ export default function WorkoutTrackerApp() {
           </TabsContent>
 
           <TabsContent value="library" className="mt-4">
-            <LibraryView onLoadRoutine={(r, mode) => {
+            <LibraryView userName={userName} onLoadRoutine={(r, mode) => {
               if (mode === 'append') {
                 setSession((prev) => ({ ...prev, exercises: [...prev.exercises, ...(r.exercises || [])] } as ResistanceSession));
               } else {
@@ -1417,11 +1552,13 @@ function WorkoutView({
   setSession,
   weekly,
   setWeekly,
+  userName,
 }: {
   session: ResistanceSession;
   setSession: (s: ResistanceSession) => void;
   weekly: WeeklyPlan;
   setWeekly: (w: WeeklyPlan) => void;
+  userName: string | null;
 }) {
   const toasts = useToasts();
   const [pendingFavorites, setPendingFavorites] = useState<Set<string>>(new Set());
@@ -1431,6 +1568,11 @@ function WorkoutView({
   const [showLoadModal, setShowLoadModal] = useState(false);
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
   const [sessionFavorited, setSessionFavorited] = useState<boolean>(false);
+  
+  // Save routine dialog state
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [routineName, setRoutineName] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     let id: any = null;
@@ -1620,32 +1762,6 @@ function WorkoutView({
     // leave the guard true to prevent re-entry
   };
 
-  // Save current session as a routine/template (no results)
-  const saveRoutine = async () => {
-    try {
-      const uid = auth.currentUser?.uid;
-      const payload = {
-        id: crypto.randomUUID(),
-        name: session.sessionName || 'Routine',
-        exercises: session.exercises.map((e) => ({ id: e.id, name: e.name, minSets: e.minSets, targetReps: e.targetReps })),
-        sessionTypes: session.sessionTypes,
-        createdAt: Date.now(),
-      };
-      if (!uid) {
-        // save locally
-        saveLocalRoutine(payload);
-  toasts.push('Routine saved locally', 'success');
-        return;
-      }
-      const ref = collection(db, 'users', uid, 'routines');
-      await addDoc(ref, payload as any);
-  toasts.push('Routine saved', 'success');
-    } catch (e) {
-      console.error('Save routine failed', e);
-  toasts.push('Save failed', 'error');
-    }
-  };
-
   const loadRoutines = async () => {
     // show modal selection — load routines into local state for modal
     try {
@@ -1666,6 +1782,84 @@ function WorkoutView({
     } catch (e) {
       console.error('Load routines failed', e);
   toasts.push('Load failed', 'error');
+    }
+  };
+
+  // Show save dialog - first step  
+  const saveRoutine = async () => {
+    console.log('[SaveRoutine] Checking if routine can be saved...');
+    
+    // Validation checks
+    if (!session.exercises || session.exercises.length === 0) {
+      console.warn('[SaveRoutine] No exercises to save');
+      toasts.push('Add exercises before saving routine', 'error');
+      return;
+    }
+    
+    // Set default name and show dialog
+    const defaultName = session.sessionName?.trim() || 'My Routine';
+    setRoutineName(defaultName);
+    setSaveDialogOpen(true);
+  };
+
+  // Actually save the routine - second step after user confirms name
+  const confirmSaveRoutine = async () => {
+    if (!routineName.trim()) {
+      toasts.push('Please enter a routine name', 'error');
+      return;
+    }
+
+    setIsSaving(true);
+    console.log('[SaveRoutine] Starting save routine process...');
+    console.log('[SaveRoutine] Session data:', {
+      routineName: routineName,
+      exercisesCount: session.exercises.length,
+      exercises: session.exercises.map(e => ({ name: e.name, minSets: e.minSets, targetReps: e.targetReps })),
+      sessionTypes: session.sessionTypes
+    });
+    
+    try {
+      const uid = auth.currentUser?.uid;
+      console.log('[SaveRoutine] User ID:', uid);
+      
+      const payload = {
+        id: crypto.randomUUID(),
+        name: routineName.trim(),
+        exercises: session.exercises.map((e) => ({ 
+          id: e.id, 
+          name: e.name, 
+          minSets: e.minSets, 
+          targetReps: e.targetReps 
+        })),
+        sessionTypes: session.sessionTypes,
+        createdAt: Date.now(),
+        public: false,
+        owner: uid,
+        ownerName: userName || 'User'
+      };
+      
+      console.log('[SaveRoutine] Payload to save:', payload);
+      
+      if (!uid) {
+        console.log('[SaveRoutine] User not signed in, saving locally');
+        saveLocalRoutine(payload);
+        toasts.push(`Routine "${routineName}" saved locally!`, 'success');
+      } else {
+        console.log('[SaveRoutine] Saving to Firestore...');
+        const ref = collection(db, 'users', uid, 'routines');
+        const docRef = await addDoc(ref, payload as any);
+        console.log('[SaveRoutine] Saved successfully with ID:', docRef.id);
+        toasts.push(`Routine "${routineName}" saved to library!`, 'success');
+      }
+      
+      // Close dialog and reset
+      setSaveDialogOpen(false);
+      setRoutineName("");
+    } catch (e) {
+      console.error('[SaveRoutine] Save routine failed:', e);
+      toasts.push(`Save failed: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -1737,7 +1931,7 @@ function WorkoutView({
                         return;
                       }
                       // no template id: save current session as routine and favorite it
-                      const payload = { name: session.sessionName || 'Routine', exercises: session.exercises.map(e=>({ name: e.name, minSets: e.minSets, targetReps: e.targetReps })), sessionTypes: session.sessionTypes || [], createdAt: Date.now(), public: false, owner: uid, ownerName: auth.currentUser?.displayName || auth.currentUser?.email || uid };
+                      const payload = { name: session.sessionName || 'Routine', exercises: session.exercises.map(e=>({ name: e.name, minSets: e.minSets, targetReps: e.targetReps })), sessionTypes: session.sessionTypes || [], createdAt: Date.now(), public: false, owner: uid, ownerName: 'User' };
                       const ref = collection(db, 'users', uid, 'routines');
                       const docRef = await addDoc(ref, payload as any);
                       const favId = `routine::${docRef.id}`;
@@ -1785,8 +1979,16 @@ function WorkoutView({
         <Button variant="outline" onClick={loadRoutines}>
           Load Routine
         </Button>
-        <Button variant="secondary" onClick={saveRoutine}>
-          <Save className="mr-2 h-4 w-4"/> Save Routine
+        <Button 
+          variant="secondary" 
+          onClick={() => {
+            console.log('[CLICK] Save Routine button clicked!');
+            saveRoutine();
+          }}
+          disabled={isSaving}
+        >
+          <Save className="mr-2 h-4 w-4"/> 
+          {isSaving ? 'Saving...' : 'Save Routine'}
         </Button>
         {/* 'New session' removed for Lifestyle Tracker flow */}
         {!session.completed && (
@@ -1832,6 +2034,56 @@ function WorkoutView({
                 setShowLoadModal(false);
                 setSelectedRoutineId(null);
               }}>Load selected</Button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Save Routine Dialog */}
+      {saveDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">Save Routine</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Routine Name
+                </label>
+                <Input
+                  value={routineName}
+                  onChange={(e) => setRoutineName(e.target.value)}
+                  placeholder="Enter routine name..."
+                  className="w-full"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && routineName.trim()) {
+                      confirmSaveRoutine();
+                    }
+                  }}
+                />
+              </div>
+              
+              <div className="text-sm text-gray-500">
+                This will save {session.exercises.length} exercises to your library.
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-2 mt-6">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setSaveDialogOpen(false);
+                  setRoutineName("");
+                }}
+                disabled={isSaving}
+              >
+                Cancel
+              </Button>
+              <Button 
+                onClick={confirmSaveRoutine}
+                disabled={isSaving || !routineName.trim()}
+              >
+                {isSaving ? 'Saving...' : 'Save Routine'}
+              </Button>
             </div>
           </div>
         </div>
@@ -2054,7 +2306,7 @@ function HistoryView({ weekly, setWeekly }: { weekly: WeeklyPlan; setWeekly: (w:
   );
 }
 
-function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, mode?: 'replace'|'append') => void }) {
+function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onLoadRoutine: (s: ResistanceSession, mode?: 'replace'|'append') => void }) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const toasts = useToasts();
@@ -2109,7 +2361,6 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
     try {
       setSaveMessage(null);
       const uid = auth.currentUser?.uid;
-      const userName = auth.currentUser?.displayName || auth.currentUser?.email || uid || 'local';
       if (composerKind === 'routine' && !composerName) { setSaveMessage('Name the routine'); return; }
       if (composerKind === 'exercise' && composerExercises.length === 0) { setSaveMessage('Add at least one exercise'); return; }
       if (!uid) { setSaveMessage('Sign in to save routines and exercises to the global library'); return; }
@@ -2120,7 +2371,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
           const ref = collection(db, 'users', uid, 'exercises');
           const createdIds: string[] = [];
           for (const ex of composerExercises) {
-            const payload = { name: ex.name, minSets: ex.minSets, targetReps: ex.targetReps, createdAt: Date.now(), public: composerPublic, owner: uid, ownerName: userName };
+            const payload = { name: ex.name, minSets: ex.minSets, targetReps: ex.targetReps, createdAt: Date.now(), public: composerPublic, owner: uid, ownerName: userName || 'User' };
             const docRef = await addDoc(ref, payload as any);
             createdIds.push(docRef.id);
           }
@@ -2133,7 +2384,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
           }
           setSaveMessage('Saved exercise(s)');
         } else {
-          const payload = { name: composerName, exercises: composerExercises.map(e => ({ name: e.name, minSets: e.minSets, targetReps: e.targetReps })), sessionTypes: [], createdAt: Date.now(), public: composerPublic, owner: uid, ownerName: userName };
+          const payload = { name: composerName, exercises: composerExercises.map(e => ({ name: e.name, minSets: e.minSets, targetReps: e.targetReps })), sessionTypes: [], createdAt: Date.now(), public: composerPublic, owner: uid, ownerName: userName || 'User' };
           const ref = collection(db, 'users', uid, 'routines');
             if (editingId) {
             await setDoc(doc(db, 'users', uid, 'routines', editingId), payload, { merge: true });
@@ -2158,38 +2409,87 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
   } catch (e) { console.error('Save composer failed', e); setSaveMessage('Save failed'); setTimeout(()=>setSaveMessage(null),3000); }
   };
 
-  const loadList = async () => {
+  const loadList = async (useFilter?: string) => {
     setLoading(true);
+    setItems([]); // Clear previous data to prevent mixing between filters
     try {
       const uid = auth.currentUser?.uid;
-      console.log('[Library] Loading list, uid:', uid, 'filter:', filter);
+      const currentFilter = useFilter || filter;
+      console.log('[Library] Loading list, uid:', uid, 'filter:', currentFilter);
       if (!uid) {
-        // Not signed in: load public content only so new users can see the shared library
-        console.log('[Library] Not signed in, loading public content only');
+        // Not signed in: load public content based on filter type
+        console.log('[Library] Not signed in, loading public content for filter:', currentFilter);
         let data: any[] = [];
-        try {
-          const cgEx = query(collectionGroup(db, 'exercises'), where('public', '==', true));
-          const publicExSnaps = await getDocs(cgEx);
-          const pubEx = publicExSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'exercise' }));
-          data = [...data, ...pubEx];
-          
-          const cgRt = query(collectionGroup(db, 'routines'), where('public', '==', true));
-          const publicRtSnaps = await getDocs(cgRt);
-          const pubRt = publicRtSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
-          data = [...data, ...pubRt];
-          
-          console.log('Unsigned user loaded', pubEx.length, 'public exercises and', pubRt.length, 'public routines');
-        } catch (e) {
-          console.error('Failed to load public content for unsigned user - INDEX ERROR:', e);
+        
+        if (currentFilter === 'exercise') {
+          // Only load public individual exercises
+          try {
+            const cgEx = query(collectionGroup(db, 'exercises'), where('public', '==', true));
+            const publicExSnaps = await getDocs(cgEx);
+            data = publicExSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'exercise' }));
+            
+            // Also extract exercises from public routines
+            const cgRt = query(collectionGroup(db, 'routines'), where('public', '==', true));
+            const publicRtSnaps = await getDocs(cgRt);
+            publicRtSnaps.docs.forEach(d => {
+              const routine = d.data() as any;
+              (routine.exercises || []).forEach((ex: any) => {
+                data.push({
+                  id: `${d.id}_${ex.name}`,
+                  name: ex.name,
+                  minSets: ex.minSets,
+                  targetReps: ex.targetReps,
+                  kind: 'exercise',
+                  owner: d.ref.parent.parent?.id || 'unknown',
+                  parentRoutine: routine.name,
+                  public: true,
+                  ownerName: routine.ownerName || 'User',
+                  createdAt: routine.createdAt
+                });
+              });
+            });
+          } catch (e) {
+            console.error('Failed to load public exercises:', e);
+          }
+        } else if (currentFilter === 'workout') {
+          // Only load public routines
+          try {
+            const cgRt = query(collectionGroup(db, 'routines'), where('public', '==', true));
+            const publicRtSnaps = await getDocs(cgRt);
+            data = publicRtSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
+          } catch (e) {
+            console.error('Failed to load public routines:', e);
+          }
+        } else if (currentFilter === 'user') {
+          // Unsigned users have no personal content
+          data = [];
+        } else if (currentFilter === 'favorites') {
+          // Unsigned users have no favorites  
+          data = [];
+        } else {
+          // 'all' filter - load both
+          try {
+            const cgEx = query(collectionGroup(db, 'exercises'), where('public', '==', true));
+            const publicExSnaps = await getDocs(cgEx);
+            const pubEx = publicExSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'exercise' }));
+            data = [...data, ...pubEx];
+            
+            const cgRt = query(collectionGroup(db, 'routines'), where('public', '==', true));
+            const publicRtSnaps = await getDocs(cgRt);
+            const pubRt = publicRtSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
+            data = [...data, ...pubRt];
+            
+            console.log('Unsigned user loaded', pubEx.length, 'public exercises and', pubRt.length, 'public routines');
+          } catch (e) {
+            console.error('Failed to load public content for unsigned user - INDEX ERROR:', e);
+          }
         }
         
         // Apply favorites filter (will be empty for unsigned users)
         data = data.map(it => ({ ...it, favorite: false }));
-        if (filter === 'favorites') {
-          data = []; // No favorites for unsigned users
-        }
         
         console.log('[Library] Final setItems call with', data.length, 'items');
+        console.log('[DEBUG] Filter:', filter, 'Data sample:', data.slice(0, 3).map(d => ({ name: d.name, kind: d.kind, exercises: d.exercises?.length })));
         const sortedData = data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         setItems(sortedData);
         setLoading(false);
@@ -2198,7 +2498,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
       
       let data: any[] = [];
       
-      if (filter === 'exercise') {
+      if (currentFilter === 'exercise') {
         // Load standalone exercises
         const ref = collection(db, 'users', uid, 'exercises');
         const snaps = await getDocs(ref);
@@ -2272,13 +2572,16 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
         
       } else if (filter === 'user') {
         // Load only user's own content
+        console.log('[DEBUG] Loading user content for uid:', uid);
         const refEx = collection(db, 'users', uid, 'exercises');
         const snapsEx = await getDocs(refEx);
         const exercises = snapsEx.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: uid, kind: 'exercise' }));
+        console.log('[DEBUG] User exercises found:', exercises.length, exercises.map(e => e.name));
         
         const refRt = collection(db, 'users', uid, 'routines');
         const snapsRt = await getDocs(refRt);
         const routines = snapsRt.docs.map((d) => ({ id: d.id, ...(d.data() as any), owner: uid, kind: 'routine' }));
+        console.log('[DEBUG] User routines found:', routines.length, routines.map(r => r.name));
         
         data = [...exercises, ...routines];
         
@@ -2314,9 +2617,17 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
       data = data.map(it => ({ ...it, favorite: false }));
       
       // For favorites filter, filter by favorited items
-      if (filter === 'favorites') {
+      if (currentFilter === 'favorites') {
         const currentFavs = (window as any).__app_favorites_cache?.map || new Set();
-        data = data.filter(it => currentFavs.has(`${it.kind||'routine'}::${it.id}`));
+        console.log('[DEBUG] Favorites filter - current cache:', Array.from(currentFavs));
+        console.log('[DEBUG] Favorites filter - data before filter:', data.map(d => ({name: d.name, id: d.id, kind: d.kind})));
+        data = data.filter(it => {
+          const key = `${it.kind||'routine'}::${it.id}`;
+          const isFav = currentFavs.has(key);
+          if (isFav) console.log('[DEBUG] Found favorite:', key, it.name);
+          return isFav;
+        });
+        console.log('[DEBUG] Favorites filter - data after filter:', data.map(d => ({name: d.name, id: d.id, kind: d.kind})));
       }
       console.log('[Library] Final setItems call with', data.length, 'items');
       const sortedData = data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -2348,11 +2659,15 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
         const onSnap = (await import('firebase/firestore')).onSnapshot as any;
         return onSnap(col, (snap: any) => {
           try {
+            console.log('[DEBUG] Favorites listener triggered, found', snap.docs.length, 'favorites documents');
             const favSet = new Set<string>();
             snap.docs.forEach((d: any) => {
               const data = d.data();
-              favSet.add(`${data.itemType||'routine'}::${data.itemId}`);
+              const favKey = `${data.itemType||'routine'}::${data.itemId}`;
+              console.log('[DEBUG] Found favorite document:', d.id, 'data:', data, 'key:', favKey);
+              favSet.add(favKey);
             });
+            console.log('[DEBUG] Final favorites set:', Array.from(favSet));
             
             // Only update cache and items if something actually changed
             const currentCache = (window as any).__app_favorites_cache?.map;
@@ -2537,7 +2852,11 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
-              onClick={() => {setFilter(key as any); loadList();}}
+              onClick={() => {
+                setItems([]); // Clear items immediately for instant UI feedback
+                setFilter(key as any); 
+                loadList(key); // Pass the new filter value directly
+              }}
               className={cn(
                 "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200",
                 filter === key
@@ -2618,13 +2937,13 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
                 <div className="flex items-center gap-3 mb-2">
                   <div className={cn(
                     "p-2 rounded-lg shrink-0",
-                    (it.kind === 'exercise' || it.exercises?.length === 1) 
+                    it.kind === 'exercise' 
                       ? "bg-emerald-100 text-emerald-700"
                       : "bg-blue-100 text-blue-700"
                   )}>
-                    {(it.kind === 'exercise' || it.exercises?.length === 1) 
-                      ? <Dumbbell className="h-4 w-4" />
-                      : <Grid3X3 className="h-4 w-4" />
+                    {it.kind === 'exercise' 
+                      ? <Target className="h-4 w-4" />
+                      : <Dumbbell className="h-4 w-4" />
                     }
                   </div>
                   <div className="flex-1 min-w-0">
@@ -2670,10 +2989,15 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
                     </div>
                   </div>
                 </div>
-                {it.ownerName && (
+                {(it.ownerName || it.owner === auth.currentUser?.uid) && (
                   <div className="flex items-center gap-1 mt-2 text-xs text-gray-500">
                     <User className="h-3 w-3" />
-                    {it.ownerName}
+                    {it.owner === auth.currentUser?.uid 
+                      ? userName || 'User'
+                      : it.ownerName?.includes('@') 
+                        ? 'User' 
+                        : (it.ownerName || 'User')
+                    }
                   </div>
                 )}
               </div>
