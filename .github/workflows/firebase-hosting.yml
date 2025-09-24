@@ -18,6 +18,12 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
+      - name: Validate secrets
+        run: |
+          if [ -z "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" ] || [ -z "${{ secrets.FIREBASE_PROJECT_ID }}" ]; then
+            echo "Missing required GitHub secrets: FIREBASE_SERVICE_ACCOUNT or FIREBASE_PROJECT_ID"
+            exit 1
+          fi
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
