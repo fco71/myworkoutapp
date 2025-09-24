@@ -57,3 +57,4 @@ DNS steps for mapping a subdomain to Firebase Hosting (fitness.franciscovaldez.c
 4. Wait for DNS propagation and for Firebase to provision the TLS certificate (can take a few minutes to an hour).
 
 If your domain is managed via Cloudflare and you experience certificate issues, ensure the Cloudflare proxy (orange cloud) is disabled for the firebase-provided verification records until validation completes.
+Wed Sep 24 00:13:04 UTC 2025
