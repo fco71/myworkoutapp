@@ -2291,17 +2291,12 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
       // For favorites filter, filter by favorited items
       if (filter === 'favorites') {
         const currentFavs = (window as any).__app_favorites_cache?.map || new Set();
+        console.log('[Library] Favorites filter - cache has', currentFavs.size, 'favorites:', Array.from(currentFavs));
+        console.log('[Library] Before favorites filter:', data.length, 'items');
         data = data.filter(it => currentFavs.has(`${it.kind||'routine'}::${it.id}`));
+        console.log('[Library] After favorites filter:', data.length, 'items');
       }
-      // basic filtering
-      if (filter !== 'all') {
-        console.log('[Library] Applying filter:', filter, 'with query:', filterQuery);
-        if (filter === 'exercise') data = data.filter(it => (it.name||it.exercises?.map((e:any)=>e.name).join(' ')||'').toLowerCase().includes(filterQuery.toLowerCase()));
-        if (filter === 'workout') data = data.filter(it => (it.name||'').toLowerCase().includes(filterQuery.toLowerCase()));
-        if (filter === 'type') data = data.filter(it => (it.sessionTypes||[]).some((t:string)=> t.toLowerCase().includes(filterQuery.toLowerCase())));
-        if (filter === 'user') data = data.filter(it => ((it.ownerName||it.owner)||'').toLowerCase().includes(filterQuery.toLowerCase()));
-        console.log('[Library] After filtering:', data.length, 'items remain');
-      }
+      
       console.log('[Library] Final setItems call with', data.length, 'items');
       const sortedData = data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       setItems(sortedData);
@@ -2337,6 +2332,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
               const data = d.data();
               favSet.add(`${data.itemType||'routine'}::${data.itemId}`);
             });
+            console.log('[Favorites Listener] Found', favSet.size, 'favorites:', Array.from(favSet));
             
             // Only update cache and items if something actually changed
             const currentCache = (window as any).__app_favorites_cache?.map;
@@ -2345,6 +2341,7 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
               Array.from(favSet).some(item => !currentCache.has(item));
               
             if (!hasChanged) return;
+            console.log('[Favorites Listener] Cache changed, updating...');
             
             (window as any).__app_favorites_cache.map = favSet;
             if (!mounted) return;
@@ -2817,17 +2814,14 @@ function LibraryView({ onLoadRoutine }: { onLoadRoutine: (s: ResistanceSession, 
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            {/* Only show session types for routines, not individual exercises */}
-            {it.kind === 'routine' && (
+            {/* Only show session types for routines that actually have session types */}
+            {it.kind === 'routine' && (it.sessionTypes || []).length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {(it.sessionTypes || []).map((type: string, idx: number) => (
                   <span key={idx} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
                     {type}
                   </span>
                 ))}
-                {(it.sessionTypes || []).length === 0 && (
-                  <span className="text-sm text-gray-400 italic">No session types</span>
-                )}
               </div>
             )}
           </CardContent>
