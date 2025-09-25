@@ -180,29 +180,41 @@ function normalizeWeekly(w: WeeklyPlan): WeeklyPlan {
   return { ...w, customTypes, benchmarks, days };
 }
 
-// Play a short beep using WebAudio API
+// Play three progressive beeps using WebAudio API
 function playBeep() {
   try {
     // Create audio context
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
     
-    // Configure oscillator
-    o.type = 'sine';
-    o.frequency.value = 880; // A5 note
-    o.connect(g);
-    g.connect(ctx.destination);
-    g.gain.value = 0.3; // Increased volume
+    // Create four beeps with increasing intensity: 80%, 90%, 100%, 90%
+    const volumes = [0.24, 0.27, 0.3, 0.27]; // 80%, 90%, 100%, 90% of 0.3 base volume
+    const delays = [0, 200, 400, 600]; // Start times in milliseconds
     
-    // Play sound
-    o.start();
-    setTimeout(() => { 
-      o.stop(); 
-      ctx.close(); 
-    }, 800); // Longer beep
+    volumes.forEach((volume, index) => {
+      setTimeout(() => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        
+        // Configure oscillator
+        o.type = 'sine';
+        o.frequency.value = 880; // A5 note
+        o.connect(g);
+        g.connect(ctx.destination);
+        g.gain.value = volume;
+        
+        // Play short burst
+        o.start();
+        setTimeout(() => { 
+          o.stop(); 
+          // Only close context after the last beep
+          if (index === volumes.length - 1) {
+            setTimeout(() => ctx.close(), 50);
+          }
+        }, 150); // Short 150ms burst
+      }, delays[index]);
+    });
     
-    console.log('Timer beep played successfully');
+    console.log('Timer triple beep played successfully');
   } catch (e) {
     console.warn('WebAudio failed, trying fallback:', e);
     // Enhanced fallback: try multiple audio approaches
