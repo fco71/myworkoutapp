@@ -11,10 +11,10 @@ export default defineConfig({
   },
   server: {
     port: 8000,
-    open: true,
+    open: '/Applications/Safari.app',
   },
   preview: {
     port: 8000,
-    open: true,
+    open: '/Applications/Safari.app',
   },
 });

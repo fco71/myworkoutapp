@@ -33,6 +33,7 @@ type ResistanceExercise = {
   name: string;
   minSets: number; // usually 3
   targetReps: number; // e.g., 6
+  intensity?: number; // 1-10 intensity rating
   sets: number[]; // reps per set, editable
 };
 
@@ -182,19 +183,68 @@ function normalizeWeekly(w: WeeklyPlan): WeeklyPlan {
 // Play a short beep using WebAudio API
 function playBeep() {
   try {
+    // Create audio context
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
     const o = ctx.createOscillator();
     const g = ctx.createGain();
+    
+    // Configure oscillator
     o.type = 'sine';
-    o.frequency.value = 880;
+    o.frequency.value = 880; // A5 note
     o.connect(g);
     g.connect(ctx.destination);
-    g.gain.value = 0.1;
+    g.gain.value = 0.3; // Increased volume
+    
+    // Play sound
     o.start();
-    setTimeout(() => { o.stop(); ctx.close(); }, 500);
+    setTimeout(() => { 
+      o.stop(); 
+      ctx.close(); 
+    }, 800); // Longer beep
+    
+    console.log('Timer beep played successfully');
   } catch (e) {
-    // fallback: try simple alert sound
-    try { new Audio().play(); } catch (_) {}
+    console.warn('WebAudio failed, trying fallback:', e);
+    // Enhanced fallback: try multiple audio approaches
+    try { 
+      // Try with a simple audio URL beep
+      const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmkiBUAAfwA=');
+      audio.volume = 0.5;
+      audio.play().then(() => {
+        console.log('Fallback audio played successfully');
+      }).catch(() => {
+        console.warn('Audio fallback failed, using visual feedback');
+        // Final fallback - visual feedback with notification
+        document.body.style.backgroundColor = '#fecaca';
+        setTimeout(() => {
+          document.body.style.backgroundColor = '';
+        }, 500);
+        
+        // Try to show browser notification as well
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('Timer Complete!', {
+            body: 'Your countdown timer has finished.',
+            icon: '/favicon.ico'
+          });
+        } else if ('Notification' in window && Notification.permission !== 'denied') {
+          Notification.requestPermission().then(permission => {
+            if (permission === 'granted') {
+              new Notification('Timer Complete!', {
+                body: 'Your countdown timer has finished.',
+                icon: '/favicon.ico'
+              });
+            }
+          });
+        }
+      });
+    } catch (_) {
+      console.warn('All audio methods failed, using visual feedback only');
+      // Absolutely final fallback - just visual
+      document.body.style.backgroundColor = '#fecaca';
+      setTimeout(() => {
+        document.body.style.backgroundColor = '';
+      }, 500);
+    }
   }
 }
 
@@ -223,8 +273,8 @@ function defaultSession(): ResistanceSession {
     dateISO: toISO(new Date()),
     sessionName: "Workout",
     exercises: [
-      { id: crypto.randomUUID(), name: "Pull-ups", minSets: 3, targetReps: 6, sets: [0, 0, 0] },
-      { id: crypto.randomUUID(), name: "Push-ups", minSets: 3, targetReps: 12, sets: [0, 0, 0] },
+      { id: crypto.randomUUID(), name: "Pull-ups", minSets: 3, targetReps: 6, intensity: 0, sets: [0, 0, 0] },
+      { id: crypto.randomUUID(), name: "Push-ups", minSets: 3, targetReps: 12, intensity: 0, sets: [0, 0, 0] },
     ],
     completed: false,
     sessionTypes: ["Resistance"],
@@ -451,6 +501,24 @@ export default function WorkoutTrackerApp() {
   const appToasts = useToasts();
   // (celebration UI removed per user request)
 
+  // Handle sign in function for Enter key support
+  const handleSignIn = async () => {
+    try {
+      if (isSignUp) {
+        await createUserWithEmailAndPassword(auth, email, password);
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+      setShowSignIn(false);
+      setEmail("");
+      setPassword("");
+      setIsSignUp(false);
+    } catch (e) {
+      console.error("Auth failed:", e);
+      appToasts.push('Sign in failed', 'error');
+    }
+  };
+
   // keep a global favorites snapshot map to keep optimistic updates reconciled across components
   // This will be populated via a listener when a user signs in (see effect below in child components)
   // Exposed via a simple ref-like object pattern (we attach to window for quick debug in dev)
@@ -621,21 +689,21 @@ export default function WorkoutTrackerApp() {
   // ...existing code...
 
   // Global floating countdown timer
-  const [countdownSec, setCountdownSec] = useState<number>(0);
-  const [countdownRunning, setCountdownRunning] = useState(false);
-  const [showCountdownModal, setShowCountdownModal] = useState(false);
-
-  // persist last-used countdown in localStorage
   const LS_COUNTDOWN = 'workout:last_countdown_sec';
-  useEffect(() => {
+  
+  // Initialize with last used value from localStorage
+  const [countdownSec, setCountdownSec] = useState<number>(() => {
     try {
       const raw = localStorage.getItem(LS_COUNTDOWN);
       if (raw) {
         const v = parseInt(raw || '0');
-        if (!isNaN(v) && v > 0) setCountdownSec(v);
+        if (!isNaN(v) && v > 0) return v;
       }
     } catch (e) { /* ignore */ }
-  }, []);
+    return 90; // Default to 1:30
+  });
+  const [countdownRunning, setCountdownRunning] = useState(false);
+  const [showCountdownModal, setShowCountdownModal] = useState(false);
 
   useEffect(() => {
     if (!countdownRunning) return;
@@ -644,7 +712,17 @@ export default function WorkoutTrackerApp() {
         if (s <= 1) {
           setCountdownRunning(false);
           playBeep();
-          return 0;
+          // Restore to saved preference when timer finishes
+          try {
+            const raw = localStorage.getItem(LS_COUNTDOWN);
+            if (raw) {
+              const saved = parseInt(raw);
+              if (!isNaN(saved) && saved > 0) {
+                return saved;
+              }
+            }
+          } catch (e) { /* ignore */ }
+          return 90; // Default to 1:30 if no saved preference
         }
         return s - 1;
       });
@@ -693,7 +771,6 @@ export default function WorkoutTrackerApp() {
               <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
                 Lifestyle Tracker
               </h1>
-              <p className="text-slate-600 mt-2">Track your fitness journey with precision</p>
             </div>
             <div className="flex gap-2">
               {userId ? (
@@ -861,31 +938,68 @@ export default function WorkoutTrackerApp() {
           <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50">
             <div className="bg-white p-6 rounded-lg w-full max-w-md">
               <h3 className="text-lg font-semibold mb-2">Set countdown</h3>
-              <div className="flex gap-2 items-center">
-                <Input type="number" placeholder="minutes" value={Math.floor(countdownSec/60)} onChange={(e) => setCountdownSec(Math.max(0, parseInt(e.target.value||'0')*60))} />
-                <Input type="number" placeholder="seconds" value={countdownSec%60} onChange={(e) => setCountdownSec(Math.max(0, (Math.floor(countdownSec/60)*60) + parseInt(e.target.value||'0')))} />
-              </div>
-              <div className="flex gap-2 mt-3">
-                {[30,60,90,120,180].map(s => (
-                  <Button key={s} variant="outline" onClick={() => setCountdownSec(s)}>{`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`}</Button>
-                ))}
-                {(() => {
-                  try {
-                    const last = parseInt(localStorage.getItem(LS_COUNTDOWN) || '0');
-                    if (!isNaN(last) && last > 0) {
-                      const mm = Math.floor(last/60); const ss = String(last%60).padStart(2,'0');
-                      return <Button variant="secondary" onClick={() => setCountdownSec(last)}>{`${mm}:${ss} (Last)`}</Button>;
+              <div className="flex gap-2 items-center mb-3">
+                <label className="text-sm font-medium">Minutes:</label>
+                <Input 
+                  type="number" 
+                  placeholder="0" 
+                  min="0"
+                  max="59"
+                  className="w-20"
+                  value={Math.floor(countdownSec/60)}
+                  onChange={(e) => {
+                    if (!countdownRunning) {
+                      const minutes = Math.max(0, Math.min(59, parseInt(e.target.value||'0')));
+                      const newValue = minutes * 60 + (countdownSec%60);
+                      setCountdownSec(newValue);
+                      try { localStorage.setItem(LS_COUNTDOWN, String(newValue)); } catch (e) {}
                     }
-                  } catch (e) { /* ignore */ }
-                  return null;
-                })()}
+                  }}
+                  disabled={countdownRunning}
+                />
+                <label className="text-sm font-medium">Seconds:</label>
+                <Input 
+                  type="number" 
+                  placeholder="0"
+                  min="0"
+                  max="59"
+                  className="w-20"
+                  value={countdownSec%60}
+                  onChange={(e) => {
+                    if (!countdownRunning) {
+                      const seconds = Math.min(59, Math.max(0, parseInt(e.target.value||'0')));
+                      const newValue = Math.floor(countdownSec/60)*60 + seconds;
+                      setCountdownSec(newValue);
+                      try { localStorage.setItem(LS_COUNTDOWN, String(newValue)); } catch (e) {}
+                    }
+                  }}
+                  disabled={countdownRunning}
+                />
+              </div>
+              <div className="flex gap-2 mt-3 flex-wrap">
+                {[30,60,90,120,180].map(s => (
+                  <Button key={s} variant="outline" onClick={() => { setCountdownSec(s); try { localStorage.setItem(LS_COUNTDOWN, String(s)); } catch (e) {} }} className="flex-shrink-0">{`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`}</Button>
+                ))}
               </div>
               <div className="flex justify-end gap-2 mt-4">
                 <Button variant="outline" onClick={() => { setShowCountdownModal(false); }}>Close</Button>
                 {!countdownRunning ? (
                   <Button onClick={() => { if (countdownSec>0) { try { localStorage.setItem(LS_COUNTDOWN, String(countdownSec)); } catch (e) {} setCountdownRunning(true); } setShowCountdownModal(false); }}>Start</Button>
                 ) : (
-                  <Button variant="destructive" onClick={() => { setCountdownRunning(false); setCountdownSec(0); setShowCountdownModal(false); }}>Stop</Button>
+                  <Button variant="destructive" onClick={() => { 
+                    setCountdownRunning(false);
+                    // Restore preferred timer value from localStorage
+                    try {
+                      const raw = localStorage.getItem(LS_COUNTDOWN);
+                      if (raw) {
+                        const saved = parseInt(raw);
+                        if (!isNaN(saved) && saved > 0) {
+                          setCountdownSec(saved);
+                        }
+                      }
+                    } catch (e) { /* ignore */ }
+                    setShowCountdownModal(false); 
+                  }}>Stop</Button>
                 )}
               </div>
             </div>
@@ -903,31 +1017,29 @@ export default function WorkoutTrackerApp() {
                 placeholder="Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && email && password) {
+                    e.preventDefault();
+                    handleSignIn();
+                  }
+                }}
               />
               <Input
                 type="password"
                 placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && email && password) {
+                    e.preventDefault();
+                    handleSignIn();
+                  }
+                }}
               />
               <div className="flex gap-2">
                 <Button
                   className="flex-1"
-                  onClick={async () => {
-                    try {
-                      if (isSignUp) {
-                        await createUserWithEmailAndPassword(auth, email, password);
-                      } else {
-                        await signInWithEmailAndPassword(auth, email, password);
-                      }
-                      setShowSignIn(false);
-                      setEmail("");
-                      setPassword("");
-                      setIsSignUp(false);
-                    } catch (e) {
-                      console.error("Auth failed:", e);
-                    }
-                  }}
+                  onClick={handleSignIn}
                 >
                   {isSignUp ? "Sign up" : "Sign in"}
                 </Button>
@@ -1656,7 +1768,7 @@ function WorkoutView({
       ...session,
       exercises: [
         ...session.exercises,
-        { id: crypto.randomUUID(), name: "", minSets: 3, targetReps: 6, sets: [0, 0, 0] },
+        { id: crypto.randomUUID(), name: "", minSets: 3, targetReps: 6, intensity: 0, sets: [0, 0, 0] },
       ],
     });
   };
@@ -2029,7 +2141,7 @@ function WorkoutView({
               <Button onClick={() => {
                 const found = routines.find((x) => x.id === selectedRoutineId);
                 if (!found) return toasts.push('Select a routine', 'info');
-                const exercises = (found.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
+                const exercises = (found.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, intensity: e.intensity || 0, sets: Array(e.minSets).fill(0) }));
                 setSession({ ...session, sessionName: found.name, exercises, completed: false, sessionTypes: found.sessionTypes || [], durationSec: 0 });
                 setShowLoadModal(false);
                 setSelectedRoutineId(null);
@@ -2147,6 +2259,16 @@ function ExerciseCard({
               value={ex.targetReps}
               min={1}
               onChange={(e) => updateExercise(ex.id, { targetReps: Math.max(1, parseInt(e.target.value || "1")) })}
+            />
+            <label className="text-neutral-600">Intensity</label>
+            <Input
+              type="number"
+              className="w-20"
+              value={ex.intensity || 0}
+              min={0}
+              max={999}
+              placeholder="0"
+              onChange={(e) => updateExercise(ex.id, { intensity: Math.max(0, Math.min(999, parseInt(e.target.value || "0"))) })}
             />
           </div>
         </div>
@@ -2335,7 +2457,7 @@ function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onL
 
   const resetComposer = () => { setComposerName(''); setComposerExercises([]); setEditingId(null); };
 
-  const addComposerExercise = () => setComposerExercises(prev => [...prev, { id: crypto.randomUUID(), name: '', minSets: 3, targetReps: 8, sets: [0,0,0] }]);
+  const addComposerExercise = () => setComposerExercises(prev => [...prev, { id: crypto.randomUUID(), name: '', minSets: 3, targetReps: 8, intensity: 0, sets: [0,0,0] }]);
 
   const editRoutine = (routine: any) => {
     // Only allow editing routines (not individual exercises) and only if user owns them
