@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, Check, Save, Bookmark, Edit, Search, Dumbbell, User, Grid3X3, Target, ChevronDown, Settings, LogOut } from "lucide-react";
+import { Plus, Trash2, Check, Save, Bookmark, Edit, Search, Dumbbell, User, Grid3X3, Target, ChevronDown, Settings, LogOut, MessageSquare } from "lucide-react";
 import { ToastContainer } from "@/components/ui/toast";
 
 // --- Types ---
@@ -17,6 +17,7 @@ type WeeklyDay = {
   types: Partial<Record<string, boolean>>; // did I do this type today?
   sessions?: number; // legacy/simple count of sessions completed that day
   sessionsList?: { id?: string; sessionTypes: WorkoutType[] }[]; // detailed sessions per day
+  comments?: Partial<Record<string, string>>; // comments/notes per workout type
 };
 
 type WeeklyPlan = {
@@ -97,6 +98,7 @@ function defaultWeekly(): WeeklyPlan {
     types: {},
     sessions: 0,
     sessionsList: [],
+    comments: {},
   }));
   return {
     weekOfISO: toISO(monday),
@@ -175,7 +177,13 @@ function normalizeWeekly(w: WeeklyPlan): WeeklyPlan {
       acc.push({ id: s?.id, sessionTypes: Array.isArray(s?.sessionTypes) ? s.sessionTypes : [] });
       return acc;
     }, []);
-    return { ...d, types, sessions: typeof d.sessions === 'number' ? d.sessions : (sessionsList.length || 0), sessionsList };
+    return { 
+      ...d, 
+      types, 
+      sessions: typeof d.sessions === 'number' ? d.sessions : (sessionsList.length || 0), 
+      sessionsList,
+      comments: d.comments || {} // Ensure comments object exists
+    };
   });
   return { ...w, customTypes, benchmarks, days };
 }
@@ -1136,6 +1144,14 @@ function WeeklyTracker({
   const types = weekly.customTypes;
   const [typesPanelOpen, setTypesPanelOpen] = useState(false);
   const [editTypeModal, setEditTypeModal] = useState<{ type: string; name: string; category: string } | null>(null);
+  
+  // Comment modal state
+  const [commentModal, setCommentModal] = useState<{ 
+    type: string; 
+    dateISO: string; 
+    dayIndex: number; 
+    comment: string; 
+  } | null>(null);
 
   const counts = useMemo(() => {
     // Counts should mirror the header: simple checkbox counts only.
@@ -1275,6 +1291,57 @@ function WeeklyTracker({
     setModalAction(null);
     setTargetType(null);
     setModalInput("");
+  };
+
+  // --- Comment handling ---
+  const openCommentModal = (type: string, dateISO: string, dayIndex: number) => {
+    const existingComment = weekly.days[dayIndex]?.comments?.[type] || '';
+    setCommentModal({
+      type,
+      dateISO,
+      dayIndex,
+      comment: existingComment
+    });
+  };
+
+  const saveComment = async () => {
+    if (!commentModal) return;
+    
+    const { type, dayIndex, comment } = commentModal;
+    const days = [...weekly.days];
+    const day = { ...days[dayIndex] };
+    
+    // Initialize comments object if it doesn't exist
+    if (!day.comments) {
+      day.comments = {};
+    } else {
+      day.comments = { ...day.comments };
+    }
+    
+    // Update or remove comment
+    if (comment.trim()) {
+      day.comments[type] = comment.trim();
+    } else {
+      delete day.comments[type];
+    }
+    
+    days[dayIndex] = day;
+    setWeekly({ ...weekly, days });
+    
+    // Persist to Firestore if user is signed in
+    const uid = auth.currentUser?.uid;
+    if (uid) {
+      try {
+        await setDoc(doc(db, 'users', uid, 'state', weekly.weekOfISO), {
+          weekly: { days: days }
+        }, { merge: true });
+      } catch (e) {
+        console.warn('Failed to save comment to Firestore', e);
+        push?.('Failed to save comment', 'error');
+      }
+    }
+    
+    setCommentModal(null);
   };
 
 
@@ -1503,7 +1570,7 @@ function WeeklyTracker({
               {types.map((t) => {
                 const hit = counts[t] >= (weekly.benchmarks[t] ?? 0);
                 return (
-                  <tr key={t} className="">
+                  <tr key={t} className="group">
                     <td className="sticky left-0 bg-white p-2 font-medium border-b">
                       <div className="flex items-center justify-between">
                         <span className={hit ? 'text-green-700' : ''}>{t}</span>
@@ -1520,6 +1587,7 @@ function WeeklyTracker({
                                 category: weekly.typeCategories?.[t] || 'None'
                               });
                             }}
+                            title="Edit type name/category"
                           >
                             <Edit className="h-3 w-3" />
                           </Button>
@@ -1544,6 +1612,7 @@ function WeeklyTracker({
                                 setWeekly({ ...weekly, days: newDays, benchmarks: newBenchmarks, customTypes: newCustomTypes, typeCategories: newCategories });
                               }
                             }}
+                            title="Delete type completely"
                           >
                             <Trash2 className="h-3 w-3" />
                           </Button>
@@ -1556,7 +1625,7 @@ function WeeklyTracker({
                         <td
                           key={`${d.dateISO}-${t}`}
                           className={cn(
-                            "p-2 text-center align-middle border-b cursor-pointer",
+                            "p-2 text-center align-middle border-b cursor-pointer relative",
                             active && "bg-green-100/70"
                           )}
                           onClick={async () => {
@@ -1624,7 +1693,29 @@ function WeeklyTracker({
                               // No automatic session reconstruction — weekly state is authoritative.
                             }}
                         >
-                          {active ? <Check className="inline h-4 w-4" /> : ""}
+                          <div className="flex items-center justify-center gap-1">
+                            {/* Main checkbox area */}
+                            <div className="flex-1 flex justify-center">
+                              {active ? <Check className="inline h-4 w-4" /> : ""}
+                            </div>
+                            
+                            {/* Comment indicator/button */}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className={cn(
+                                "h-5 w-5 p-0 opacity-0 group-hover:opacity-60 hover:!opacity-100 absolute top-0 right-0 m-0.5",
+                                d.comments?.[t] && "opacity-60 text-blue-600 bg-blue-50"
+                              )}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openCommentModal(t, d.dateISO, idx);
+                              }}
+                              title={d.comments?.[t] ? `Comment: ${d.comments[t]}` : "Add comment"}
+                            >
+                              <MessageSquare className="h-3 w-3" />
+                            </Button>
+                          </div>
                         </td>
                       );
                     })}
@@ -1666,6 +1757,44 @@ function WeeklyTracker({
           </table>
         </div>
       </CardContent>
+      
+      {/* Comment Modal */}
+      {commentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">
+              Add Comment - {commentModal.type}
+            </h3>
+            <p className="text-sm text-gray-600 mb-3">
+              {new Date(commentModal.dateISO + 'T00:00').toLocaleDateString(undefined, { 
+                weekday: 'long', 
+                month: 'short', 
+                day: 'numeric' 
+              })}
+            </p>
+            <div className="space-y-4">
+              <textarea
+                className="w-full border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                rows={4}
+                placeholder="Add notes about this activity..."
+                value={commentModal.comment}
+                onChange={(e) => setCommentModal({
+                  ...commentModal,
+                  comment: e.target.value
+                })}
+              />
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <Button variant="outline" onClick={() => setCommentModal(null)}>
+                Cancel
+              </Button>
+              <Button onClick={saveComment}>
+                Save Comment
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
   </Card>
   );
 }
