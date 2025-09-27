@@ -1625,7 +1625,7 @@ function WeeklyTracker({
                         <td
                           key={`${d.dateISO}-${t}`}
                           className={cn(
-                            "p-2 text-center align-middle border-b cursor-pointer relative",
+                            "p-2 text-center align-middle border-b cursor-pointer relative group/cell",
                             active && "bg-green-100/70"
                           )}
                           onClick={async () => {
@@ -1704,8 +1704,8 @@ function WeeklyTracker({
                               size="sm"
                               variant="ghost"
                               className={cn(
-                                "h-5 w-5 p-0 opacity-0 group-hover:opacity-60 hover:!opacity-100 absolute top-0 right-0 m-0.5",
-                                d.comments?.[t] && "opacity-60 text-blue-600 bg-blue-50"
+                                "h-5 w-5 p-0 opacity-0 group-hover/cell:opacity-60 hover:!opacity-100 absolute top-0 right-0 m-0.5",
+                                d.comments?.[t] && "!opacity-60 text-blue-600 bg-blue-50"
                               )}
                               onClick={(e) => {
                                 e.stopPropagation();
