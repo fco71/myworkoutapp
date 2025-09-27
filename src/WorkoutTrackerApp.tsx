@@ -1570,7 +1570,7 @@ function WeeklyTracker({
               {types.map((t) => {
                 const hit = counts[t] >= (weekly.benchmarks[t] ?? 0);
                 return (
-                  <tr key={t} className="group">
+                  <tr key={t} className="">
                     <td className="sticky left-0 bg-white p-2 font-medium border-b">
                       <div className="flex items-center justify-between">
                         <span className={hit ? 'text-green-700' : ''}>{t}</span>
@@ -1625,7 +1625,7 @@ function WeeklyTracker({
                         <td
                           key={`${d.dateISO}-${t}`}
                           className={cn(
-                            "p-2 text-center align-middle border-b cursor-pointer relative group/cell",
+                            "p-2 text-center align-middle border-b cursor-pointer relative hover-parent",
                             active && "bg-green-100/70"
                           )}
                           onClick={async () => {
@@ -1704,7 +1704,9 @@ function WeeklyTracker({
                               size="sm"
                               variant="ghost"
                               className={cn(
-                                "h-5 w-5 p-0 opacity-0 group-hover/cell:opacity-60 hover:!opacity-100 absolute top-0 right-0 m-0.5",
+                                "h-5 w-5 p-0 absolute top-0 right-0 m-0.5 transition-opacity",
+                                "opacity-0 hover:!opacity-100",
+                                "[.hover-parent:hover_&]:opacity-60",
                                 d.comments?.[t] && "!opacity-60 text-blue-600 bg-blue-50"
                               )}
                               onClick={(e) => {
