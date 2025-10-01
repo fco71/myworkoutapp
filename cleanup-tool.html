@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Session Cleanup Tool</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .btn { background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 16px; margin: 10px 0; }
+        .btn:hover { background: #0056b3; }
+        .btn:disabled { background: #ccc; cursor: not-allowed; }
+        .log { background: #f8f9fa; border: 1px solid #e9ecef; padding: 15px; border-radius: 6px; max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+        .warning { background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 6px; margin: 15px 0; color: #856404; }
+        .success { background: #d1edff; border: 1px solid #bee5eb; padding: 15px; border-radius: 6px; margin: 15px 0; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧹 Workout Session Cleanup Tool</h1>
+        
+        <div class="warning">
+            <strong>⚠️ Important Instructions:</strong>
+            <ol>
+                <li>First, go to your workout app at <code>http://localhost:8001</code></li>
+                <li>Sign in to your account</li>
+                <li>Then come back to this page and click the cleanup button below</li>
+            </ol>
+        </div>
+        
+        <p>This tool will clean up duplicate sessions (like the 11 sessions you have on September 27th) by keeping only one session per timestamp and deleting the duplicates.</p>
+        
+        <button id="cleanupBtn" class="btn" onclick="runCleanup()">🧹 Clean Up Duplicate Sessions</button>
+        
+        <div id="status"></div>
+        <div id="log" class="log" style="display: none;"></div>
+    </div>
+
+    <script type="module">
+        // Import Firebase
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js';
+        import { getFirestore, collection, getDocs, doc, deleteDoc } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js';
+        import { getAuth } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js';
+
+        // Firebase config
+        const firebaseConfig = {
+            apiKey: "AIzaSyB7OR5aBzZ8N4d7BaB_HlZoFfWGegG7Fvg",
+            authDomain: "fcoworkout.firebaseapp.com",
+            projectId: "fcoworkout",
+            storageBucket: "fcoworkout.firebasestorage.app",
+            messagingSenderId: "939615720328",
+            appId: "1:939615720328:web:d60687e4e617d0d3b5203d"
+        };
+
+        let app, db, auth;
+        
+        try {
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            
+            document.getElementById('status').innerHTML = '<div class="success">✅ Firebase initialized. You can now run the cleanup.</div>';
+        } catch (e) {
+            document.getElementById('status').innerHTML = '<div class="warning">❌ Firebase configuration missing. Please add your Firebase config to this file.</div>';
+        }
+
+        window.runCleanup = async function() {
+            const logDiv = document.getElementById('log');
+            const btn = document.getElementById('cleanupBtn');
+            
+            logDiv.style.display = 'block';
+            logDiv.textContent = '';
+            btn.disabled = true;
+            btn.textContent = '🔄 Running cleanup...';
+            
+            function log(message) {
+                logDiv.textContent += message + '\n';
+                logDiv.scrollTop = logDiv.scrollHeight;
+                console.log(message);
+            }
+            
+            try {
+                const uid = auth.currentUser?.uid;
+                if (!uid) {
+                    log('❌ Error: Not signed in. Please sign in to your workout app first at http://localhost:8001');
+                    return;
+                }
+                
+                log('🔍 Starting duplicate session cleanup...');
+                log(`👤 User ID: ${uid}`);
+                
+                // Get all sessions
+                const sessionsRef = collection(db, 'users', uid, 'sessions');
+                const snapshot = await getDocs(sessionsRef);
+                
+                log(`📊 Found ${snapshot.docs.length} total sessions`);
+                
+                if (snapshot.docs.length === 0) {
+                    log('ℹ️  No sessions found. Nothing to clean up.');
+                    return;
+                }
+                
+                // Group sessions by date
+                const sessionsByDate = new Map();
+                
+                snapshot.docs.forEach(docSnap => {
+                    const data = docSnap.data();
+                    const date = data.dateISO || new Date(data.completedAt || data.ts || 0).toISOString().split('T')[0];
+                    
+                    if (!sessionsByDate.has(date)) {
+                        sessionsByDate.set(date, []);
+                    }
+                    
+                    sessionsByDate.get(date).push({
+                        id: docSnap.id,
+                        data: data
+                    });
+                });
+                
+                let totalDeleted = 0;
+                
+                // Process each date
+                for (const [date, sessions] of sessionsByDate) {
+                    if (sessions.length <= 1) {
+                        log(`✅ ${date}: Only ${sessions.length} session - OK`);
+                        continue;
+                    }
+                    
+                    log(`⚠️  ${date}: Found ${sessions.length} sessions - checking for duplicates`);
+                    
+                    // Look for sessions with same timestamp (likely duplicates)
+                    const timeGroups = new Map();
+                    
+                    sessions.forEach(session => {
+                        const timestamp = session.data.completedAt || session.data.ts || 0;
+                        const timeKey = Math.floor(timestamp / 60000); // Group by minute
+                        
+                        if (!timeGroups.has(timeKey)) {
+                            timeGroups.set(timeKey, []);
+                        }
+                        timeGroups.get(timeKey).push(session);
+                    });
+                    
+                    // Delete duplicates, keeping the CORRECT one based on actual workout data
+                    for (const [timeKey, timeGroupSessions] of timeGroups) {
+                        if (timeGroupSessions.length > 1) {
+                            const timeStr = new Date(timeKey * 60000).toLocaleTimeString();
+                            log(`🗑️  ${date} ${timeStr}: Found ${timeGroupSessions.length} sessions at same time`);
+                            
+                            // For Sept 26 (Friday), keep session with empty or minimal types (you did nothing)
+                            // For Sept 27 (Saturday), keep session with "Meditation" only
+                            // For other dates, keep the one with the most specific/least types
+                            let toKeep;
+                            
+                            if (date === '2025-09-26') {
+                                // Friday - you did NOTHING, so keep session with no sessionTypes or minimal types
+                                toKeep = timeGroupSessions.find(s => {
+                                    const types = s.data.sessionTypes || [];
+                                    return types.length === 0;
+                                }) || timeGroupSessions.reduce((best, current) => {
+                                    const bestTypes = best.data.sessionTypes || [];
+                                    const currentTypes = current.data.sessionTypes || [];
+                                    return currentTypes.length < bestTypes.length ? current : best;
+                                });
+                            } else if (date === '2025-09-27') {
+                                // Saturday - keep session with "Meditation" only
+                                toKeep = timeGroupSessions.find(s => {
+                                    const types = s.data.sessionTypes || [];
+                                    return types.includes('Meditation') && !types.includes('Guitar') && !types.includes('Rings');
+                                }) || timeGroupSessions[0];
+                            } else {
+                                // For other dates, keep the session with fewest types (most likely to be correct)
+                                toKeep = timeGroupSessions.reduce((best, current) => {
+                                    const bestTypes = best.data.sessionTypes || [];
+                                    const currentTypes = current.data.sessionTypes || [];
+                                    return currentTypes.length < bestTypes.length ? current : best;
+                                });
+                            }
+                            
+                            const toDelete = timeGroupSessions.filter(s => s.id !== toKeep.id);
+                            
+                            log(`   ✅ Keeping session ${toKeep.id}: types=[${(toKeep.data.sessionTypes || []).join(', ')}]`);
+                            
+                            for (const session of toDelete) {
+                                log(`   🗑️  Deleting session ${session.id}: types=[${(session.data.sessionTypes || []).join(', ')}]`);
+                                
+                                try {
+                                    await deleteDoc(doc(db, 'users', uid, 'sessions', session.id));
+                                    totalDeleted++;
+                                } catch (e) {
+                                    log(`   ❌ Failed to delete ${session.id}: ${e.message}`);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                log(`✅ Cleanup complete! Deleted ${totalDeleted} duplicate sessions.`);
+                log('🔄 Go back to your workout app and refresh the History view to see the changes.');
+                
+                document.getElementById('status').innerHTML = `<div class="success">🎉 Success! Deleted ${totalDeleted} duplicate sessions. Refresh your workout app's History view.</div>`;
+                
+            } catch (error) {
+                log(`❌ Cleanup failed: ${error.message}`);
+                document.getElementById('status').innerHTML = `<div class="warning">❌ Cleanup failed: ${error.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🧹 Clean Up Duplicate Sessions';
+            }
+        };
+    </script>
+</body>
+</html>

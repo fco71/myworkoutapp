@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Session Types Cleanup</title>
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js';
+    import { getFirestore, collection, getDocs, doc, updateDoc } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js';
+    import { getAuth, signInWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js';
+
+    // Firebase config - you'll need to add your config here
+    const firebaseConfig = {
+      // Add your Firebase config here from firebase-config.js
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+
+    window.cleanupSessions = async () => {
+      try {
+        const uid = auth.currentUser?.uid;
+        if (!uid) {
+          console.log('Please sign in first');
+          return;
+        }
+
+        const sessionsRef = collection(db, 'users', uid, 'sessions');
+        const snapshot = await getDocs(sessionsRef);
+        
+        console.log(`Found ${snapshot.docs.length} sessions to check`);
+        
+        let updatedCount = 0;
+        
+        for (const sessionDoc of snapshot.docs) {
+          const sessionData = sessionDoc.data();
+          const currentSessionTypes = sessionData.sessionTypes || [];
+          
+          // Define valid session types based on actual workout activities
+          const validTypes = ['Resistance', 'Cardio', 'Bike', 'Calves', 'Arms', 'Legs', 'Push', 'Pull', 'Upper', 'Lower', 'Core', 'HIIT', 'Yoga', 'Stretch'];
+          const invalidTypes = ['Meditation', 'Guitar', 'Reading', 'Music', 'Art', 'Cooking', 'Walking', 'Relaxation'];
+          
+          // Filter out invalid types
+          const cleanedSessionTypes = currentSessionTypes.filter(type => 
+            !invalidTypes.includes(type) && validTypes.includes(type)
+          );
+          
+          // Only update if there's a change
+          if (cleanedSessionTypes.length !== currentSessionTypes.length || 
+              !cleanedSessionTypes.every(type => currentSessionTypes.includes(type))) {
+            
+            console.log(`Updating session ${sessionDoc.id}:`);
+            console.log(`  Before: ${currentSessionTypes.join(', ')}`);
+            console.log(`  After:  ${cleanedSessionTypes.join(', ')}`);
+            
+            await updateDoc(doc(db, 'users', uid, 'sessions', sessionDoc.id), {
+              sessionTypes: cleanedSessionTypes
+            });
+            updatedCount++;
+          }
+        }
+        
+        console.log(`Cleanup complete! Updated ${updatedCount} sessions.`);
+        alert(`Cleanup complete! Updated ${updatedCount} sessions.`);
+        
+      } catch (error) {
+        console.error('Cleanup failed:', error);
+        alert('Cleanup failed: ' + error.message);
+      }
+    };
+
+    window.signIn = async () => {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+        console.log('Signed in successfully');
+        document.getElementById('status').textContent = 'Signed in successfully';
+      } catch (error) {
+        console.error('Sign in failed:', error);
+        document.getElementById('status').textContent = 'Sign in failed: ' + error.message;
+      }
+    };
+  </script>
+</head>
+<body>
+  <h1>Session Types Cleanup Tool</h1>
+  
+  <div style="margin: 20px 0;">
+    <h3>1. Sign In</h3>
+    <input type="email" id="email" placeholder="Email" style="margin: 5px; padding: 5px;">
+    <input type="password" id="password" placeholder="Password" style="margin: 5px; padding: 5px;">
+    <button onclick="signIn()" style="margin: 5px; padding: 5px 10px;">Sign In</button>
+    <div id="status" style="margin: 5px; color: green;"></div>
+  </div>
+  
+  <div style="margin: 20px 0;">
+    <h3>2. Clean Up Sessions</h3>
+    <p>This will remove invalid workout types (like "Meditation", "Guitar") from your completed sessions.</p>
+    <button onclick="cleanupSessions()" style="margin: 5px; padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px;">
+      Clean Up Sessions
+    </button>
+  </div>
+  
+  <div style="margin: 20px 0;">
+    <h3>Instructions:</h3>
+    <ol>
+      <li>First, you need to add your Firebase config to this file (see firebase-config.js)</li>
+      <li>Sign in with your workout app credentials</li>
+      <li>Click "Clean Up Sessions" to remove invalid workout types from your history</li>
+      <li>Check your History view in the main app - it should now show only correct workout types</li>
+    </ol>
+  </div>
+  
+</body>
+</html>

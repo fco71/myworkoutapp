@@ -9,6 +9,25 @@ import { Input } from "@/components/ui/input";
 import { Plus, Trash2, Check, Save, Bookmark, Edit, Search, Dumbbell, User, Grid3X3, Target, ChevronDown, Settings, LogOut, MessageSquare } from "lucide-react";
 import { ToastContainer } from "@/components/ui/toast";
 
+// Expose Firebase objects globally for console access
+(window as any).appAuth = auth;
+(window as any).appDb = db;
+(window as any).appCollection = collection;
+(window as any).appGetDocs = getDocs;
+(window as any).appDeleteDoc = deleteDoc;
+(window as any).appDoc = doc;
+(window as any).appAddDoc = addDoc;
+(window as any).appSetDoc = setDoc;
+(window as any).appGetDoc = getDoc;
+
+// Expose Firebase objects globally for console access
+(window as any).appAuth = auth;
+(window as any).appDb = db;
+(window as any).appCollection = collection;
+(window as any).appGetDocs = getDocs;
+(window as any).appDeleteDoc = deleteDoc;
+(window as any).appDoc = doc;
+
 // --- Types ---
 type WorkoutType = string; // flexible, user-defined types like 'Bike', 'Calves', 'Resistance', 'Cardio'
 
@@ -488,9 +507,278 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
   );
 }
 
+// Weekly Benchmark Stack Component - shows previous weeks using the actual WeeklyTracker format
+function WeeklyBenchmarkStack({ 
+  previousWeeks, 
+  onUpdateWeek 
+}: { 
+  previousWeeks: WeeklyPlan[];
+  onUpdateWeek: (week: WeeklyPlan) => void;
+}) {
+  const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set());
+  
+  const toggleWeek = (weekNumber: number) => {
+    const newExpanded = new Set(expandedWeeks);
+    if (newExpanded.has(weekNumber)) {
+      newExpanded.delete(weekNumber);
+    } else {
+      newExpanded.add(weekNumber);
+    }
+    setExpandedWeeks(newExpanded);
+  };
+
+  // Calculate week stats for summary
+  const calculateWeekStats = (weekly: WeeklyPlan) => {
+    const cleanedDays = weekly.days.map(d => {
+      const types: Record<string, boolean> = {};
+      Object.keys(d.types || {}).forEach(k => { 
+        const kk = String(k).trim(); 
+        if (kk) types[kk] = !!d.types[k]; 
+      });
+      return { ...d, types };
+    });
+
+    const weekDone = cleanedDays.reduce((acc, d) => {
+      return acc + Object.keys(d.types || {}).filter(k => d.types[k]).length;
+    }, 0);
+
+    return { weekDone };
+  };
+
+  if (previousWeeks.length === 0) {
+    return (
+      <div className="mt-8 p-6 text-center text-gray-500 bg-gray-50 rounded-lg">
+        <p>No previous weeks available</p>
+        <p className="text-sm">Previous weeks will appear here as you track your workouts</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 mt-8">
+      <div className="flex items-center justify-between mb-6">
+        <h3 className="text-xl font-semibold text-gray-800">Previous Weeks</h3>
+        <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+          {previousWeeks.length} weeks
+        </span>
+      </div>
+
+      {previousWeeks.map((week, index) => {
+        const isExpanded = expandedWeeks.has(week.weekNumber || index);
+        const stats = calculateWeekStats(week);
+
+        return (
+          <Card key={week.weekNumber || index} className="border border-gray-200 hover:border-gray-300 transition-colors">
+            <CardContent className="p-0">
+              {/* Collapsed Header */}
+              <div 
+                className="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                onClick={() => toggleWeek(week.weekNumber || index)}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <button className="text-gray-500 hover:text-gray-700">
+                      {isExpanded ? '🔽' : '▶️'}
+                    </button>
+                    <div>
+                      <h4 className="font-semibold text-gray-800">
+                        Week {week.weekNumber || `${index + 1}`}
+                      </h4>
+                      <p className="text-sm text-gray-500">
+                        {week.days[0]?.dateISO} to {week.days[6]?.dateISO}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {/* Summary Stats */}
+                  <div className="flex items-center gap-4 text-sm">
+                    <div className="text-center">
+                      <div className="font-bold text-blue-600 text-lg">{stats.weekDone}</div>
+                      <div className="text-gray-500">Workouts</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Expanded Content - Shows the actual WeeklyTracker for that week */}
+              {isExpanded && (
+                <div className="border-t border-gray-100 p-6 bg-gray-50">
+                  <div className="bg-white rounded-lg p-4">
+                    <h5 className="text-sm font-medium text-gray-700 mb-4">
+                      Week {week.weekNumber} Daily Tracker
+                    </h5>
+                    
+                    {/* Render the actual daily tracker interface for this week */}
+                    <PreviousWeekTracker 
+                      weekly={week} 
+                      onUpdateWeek={onUpdateWeek}
+                    />
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+// Previous Week Tracker - Now editable to allow manual corrections
+function PreviousWeekTracker({
+  weekly,
+  onUpdateWeek,
+}: {
+  weekly: WeeklyPlan;
+  onUpdateWeek: (week: WeeklyPlan) => void;
+}) {
+  const types = weekly.customTypes;
+  const today = toISO(new Date());
+  
+  const toggleWorkout = (dayIndex: number, type: string) => {
+    console.log(`🔄 [${new Date().toISOString()}] Toggle workout - Day ${dayIndex}, Type: ${type}`);
+    
+    const updatedWeekly = { ...weekly };
+    updatedWeekly.days = [...weekly.days];
+    updatedWeekly.days[dayIndex] = { ...weekly.days[dayIndex] };
+    
+    // Toggle the workout type
+    const currentValue = updatedWeekly.days[dayIndex].types?.[type] || false;
+    console.log(`Current value for ${type}: ${currentValue} -> ${!currentValue}`);
+    
+    updatedWeekly.days[dayIndex].types = {
+      ...updatedWeekly.days[dayIndex].types,
+      [type]: !currentValue
+    };
+    
+    // Update session count and list
+    const completedTypes = Object.keys(updatedWeekly.days[dayIndex].types).filter(
+      t => updatedWeekly.days[dayIndex].types[t]
+    );
+    
+    updatedWeekly.days[dayIndex].sessions = completedTypes.length > 0 ? 1 : 0;
+    updatedWeekly.days[dayIndex].sessionsList = completedTypes.length > 0 ? [{
+      sessionTypes: completedTypes
+    }] : [];
+    
+    console.log(`📊 Updated day ${dayIndex}:`, updatedWeekly.days[dayIndex]);
+    console.log(`🚀 Calling onUpdateWeek...`);
+    onUpdateWeek(updatedWeekly);
+  };
+  
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-medium text-gray-800">Manual Edit Mode</h3>
+        <div className="text-sm text-blue-600 bg-blue-50 px-3 py-1 rounded">
+          Click checkboxes to edit from memory
+        </div>
+      </div>
+
+      {/* Weekly Grid */}
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr>
+              <th className="text-left p-3 border-b font-medium text-gray-700">Workout Type</th>
+              {weekly.days.map((day, dayIndex) => {
+                const date = new Date(day.dateISO + 'T00:00');
+                const isToday = day.dateISO === today;
+                
+                return (
+                  <th key={dayIndex} className={`text-center p-3 border-b font-medium min-w-[100px] ${
+                    isToday ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
+                  }`}>
+                    <div className="text-xs">{date.toLocaleDateString(undefined, { weekday: "short" })}</div>
+                    <div className={`text-sm ${isToday ? 'font-bold' : ''}`}>
+                      {date.getMonth() + 1}/{date.getDate()}
+                    </div>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {types.map((type, typeIndex) => (
+              <tr key={typeIndex} className="hover:bg-gray-50">
+                <td className="p-3 border-b font-medium text-gray-800">
+                  {type}
+                </td>
+                {weekly.days.map((day, dayIndex) => {
+                  const isChecked = day.types?.[type] || false;
+                  const hasComment = day.comments?.[type]?.trim();
+                  const isToday = day.dateISO === today;
+                  
+                  return (
+                    <td key={dayIndex} className={`p-3 border-b text-center ${
+                      isToday ? 'bg-blue-50' : ''
+                    }`}>
+                      <div className="flex flex-col items-center gap-1">
+                        {/* Clickable Checkbox - Now editable */}
+                        <button
+                          onClick={() => toggleWorkout(dayIndex, type)}
+                          className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors hover:shadow-md ${
+                            isChecked 
+                              ? 'bg-green-500 border-green-500 text-white hover:bg-green-600' 
+                              : 'border-gray-300 bg-white hover:border-gray-400'
+                          }`}
+                          title="Click to toggle workout completion"
+                        >
+                          {isChecked && <Check className="w-4 h-4" />}
+                        </button>
+                        
+                        {/* Comment indicator */}
+                        {hasComment && (
+                          <div className="w-2 h-2 bg-blue-500 rounded-full" title={day.comments?.[type]}></div>
+                        )}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Week Summary */}
+      <div className="bg-gray-100 p-4 rounded-lg">
+        <div className="grid grid-cols-7 gap-2">
+          {weekly.days.map((day, dayIndex) => {
+            const dayTypes = Object.keys(day.types || {}).filter(t => day.types[t]);
+            const date = new Date(day.dateISO + 'T00:00');
+            
+            return (
+              <div key={dayIndex} className="text-center p-2 bg-white rounded">
+                <div className="text-xs text-gray-500 mb-1">{date.toLocaleDateString(undefined, { weekday: "short" })}</div>
+                <div className="text-sm font-bold text-gray-700 mb-1">
+                  {date.getDate()}
+                </div>
+                <div className={`text-lg font-bold ${
+                  dayTypes.length > 0 ? 'text-green-600' : 'text-gray-400'
+                }`}>
+                  {dayTypes.length || '—'}
+                </div>
+                {dayTypes.length > 0 && (
+                  <div className="text-xs text-gray-600 mt-1">
+                    {dayTypes.slice(0, 2).join(', ')}
+                    {dayTypes.length > 2 && '...'}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- Components ---
 export default function WorkoutTrackerApp() {
   const [weekly, setWeekly] = useState<WeeklyPlan>(defaultWeekly());
+  const [previousWeeks, setPreviousWeeks] = useState<WeeklyPlan[]>([]);
   const [session, setSession] = useState<ResistanceSession>(defaultSession());
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
@@ -627,6 +915,63 @@ export default function WorkoutTrackerApp() {
                     console.warn('[WT] Failed to reconstruct sessionsList from sessions collection', e);
                   }
                   setWeekly(normalized);
+                  
+                  // Load multiple previous weeks for benchmark display
+                  try {
+                    const prevWeeksData: WeeklyPlan[] = [];
+                    const currentMonday = getMonday();
+                    console.debug('[WT] Loading previous weeks, current Monday:', toISO(currentMonday));
+                    
+                    // Load previous 4 weeks
+                    for (let i = 1; i <= 4; i++) {
+                      const prevMonday = new Date(currentMonday);
+                      prevMonday.setDate(currentMonday.getDate() - (7 * i)); // Go back i weeks
+                      const prevMondayISO = toISO(prevMonday);
+                      
+                      console.debug(`[WT] Checking week ${i}, Monday: ${prevMondayISO}`);
+                      
+                      const prevWeekRef = doc(db, 'users', u.uid, 'state', prevMondayISO);
+                      const prevSnap = await getDoc(prevWeekRef);
+                      
+                      if (prevSnap.exists()) {
+                        const prevData = prevSnap.data() as PersistedState;
+                        console.debug(`[WT] Found data for ${prevMondayISO}:`, prevData);
+                        
+                        if (prevData?.weekly) {
+                          const prevUniq = ensureUniqueTypes(prevData.weekly.customTypes || []);
+                          let prevNormalized = normalizeWeekly({ ...prevData.weekly, customTypes: prevUniq } as WeeklyPlan);
+                          prevWeeksData.push(prevNormalized);
+                          console.debug('[WT] Loaded previous week', { 
+                            week: i, 
+                            weekNumber: prevNormalized.weekNumber, 
+                            date: prevMondayISO,
+                            customTypes: prevNormalized.customTypes,
+                            daysWithData: prevNormalized.days.filter(d => Object.keys(d.types || {}).length > 0).length
+                          });
+                        } else {
+                          console.debug(`[WT] No weekly data in document for ${prevMondayISO}`);
+                        }
+                      } else {
+                        console.debug(`[WT] No document found for ${prevMondayISO}`);
+                      }
+                    }
+                    
+                    // Sort by week number descending (most recent first)
+                    prevWeeksData.sort((a, b) => (b.weekNumber || 0) - (a.weekNumber || 0));
+                    setPreviousWeeks(prevWeeksData);
+                    console.debug('[WT] Final previous weeks loaded', { 
+                      count: prevWeeksData.length, 
+                      weeks: prevWeeksData.map(w => ({ 
+                        weekNumber: w.weekNumber, 
+                        weekOfISO: w.weekOfISO,
+                        typesCount: w.customTypes.length,
+                        activeDays: w.days.filter(d => Object.keys(d.types || {}).length > 0).length
+                      })) 
+                    });
+                  } catch (e) {
+                    console.warn('[WT] Failed to load previous weeks data', e);
+                    setPreviousWeeks([]);
+                  }
               }
               if (data?.session) setSession(data.session);
             } else {
@@ -919,8 +1264,44 @@ export default function WorkoutTrackerApp() {
           </TabsList>
 
       <TabsContent value="week" className="mt-4">
-  <WeeklyTracker weekly={weekly} setWeekly={setWeekly} push={appToasts.push} />
-          </TabsContent>
+        <WeeklyTracker weekly={weekly} setWeekly={setWeekly} push={appToasts.push} />
+        
+        {/* Weekly Benchmark Stack - Previous weeks as collapsible benchmark charts */}
+        <WeeklyBenchmarkStack 
+          previousWeeks={previousWeeks} 
+          onUpdateWeek={async (week) => {
+            try {
+              console.log('📝 onUpdateWeek called with:', week);
+              console.log('💾 Saving edited week:', week.weekOfISO);
+              
+              if (!userId) {
+                console.error('❌ No user ID available');
+                return;
+              }
+              
+              // Save the updated week to Firebase - Clean undefined values
+              const cleanWeek = JSON.parse(JSON.stringify(week, (_key, value) => {
+                return value === undefined ? null : value;
+              }));
+              
+              const weekRef = doc(db, 'users', userId, 'state', week.weekOfISO);
+              await setDoc(weekRef, { weekly: cleanWeek });
+              
+              console.log('✅ Week saved successfully to Firebase');
+              
+              // Update local state to reflect changes
+              setPreviousWeeks(prev => {
+                const updated = prev.map(w => w.weekOfISO === week.weekOfISO ? week : w);
+                console.log('🔄 Updated previousWeeks state');
+                return updated;
+              });
+              
+            } catch (error) {
+              console.error('❌ Error saving week:', error);
+            }
+          }} 
+        />
+      </TabsContent>
 
           <TabsContent value="workout" className="mt-4">
             <WorkoutView session={session} setSession={setSession} weekly={weekly} setWeekly={setWeekly} userName={userName} />
