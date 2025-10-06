@@ -55,6 +55,7 @@ type ResistanceExercise = {
   targetReps: number; // e.g., 6
   intensity?: number; // 1-10 intensity rating
   sets: number[]; // reps per set, editable
+  notes?: string; // user notes for this exercise
 };
 
 type ResistanceSession = {
@@ -218,11 +219,10 @@ function playBeep() {
     // Create audio context
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
     
-    // Create four beeps with increasing intensity: 80%, 90%, 100%, 90%
-    const volumes = [0.24, 0.27, 0.3, 0.27]; // 80%, 90%, 100%, 90% of 0.3 base volume
+    // Create four beeps with consistent system volume
     const delays = [0, 200, 400, 600]; // Start times in milliseconds
     
-    volumes.forEach((volume, index) => {
+    delays.forEach((delay, index) => {
       setTimeout(() => {
         const o = ctx.createOscillator();
         const g = ctx.createGain();
@@ -232,18 +232,19 @@ function playBeep() {
         o.frequency.value = 880; // A5 note
         o.connect(g);
         g.connect(ctx.destination);
-        g.gain.value = volume;
+        // Use system volume - no artificial volume reduction
+        g.gain.value = 1.0;
         
         // Play short burst
         o.start();
         setTimeout(() => { 
           o.stop(); 
           // Only close context after the last beep
-          if (index === volumes.length - 1) {
+          if (index === delays.length - 1) {
             setTimeout(() => ctx.close(), 50);
           }
         }, 150); // Short 150ms burst
-      }, delays[index]);
+      }, delay);
     });
     
     console.log('Timer triple beep played successfully');
@@ -253,41 +254,176 @@ function playBeep() {
     try { 
       // Try with a simple audio URL beep
       const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmkiBUAAfwA=');
-      audio.volume = 0.5;
+      // Use system volume - no artificial volume reduction
       audio.play().then(() => {
         console.log('Fallback audio played successfully');
       }).catch(() => {
         console.warn('Audio fallback failed, using visual feedback');
-        // Final fallback - visual feedback with notification
-        document.body.style.backgroundColor = '#fecaca';
+        // Enhanced visual feedback with pulsing animation
+        document.body.style.backgroundColor = '#dc2626';
+        document.body.style.transition = 'background-color 0.2s ease';
+        
+        // Create a more prominent visual indicator
+        const alertDiv = document.createElement('div');
+        alertDiv.innerHTML = '⏰ Timer Complete!';
+        alertDiv.style.cssText = `
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          background: #dc2626;
+          color: white;
+          padding: 20px 40px;
+          border-radius: 10px;
+          font-size: 24px;
+          font-weight: bold;
+          z-index: 10000;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+          animation: pulse 1s infinite;
+        `;
+        
+        // Add pulse animation
+        if (!document.getElementById('timer-pulse-style')) {
+          const style = document.createElement('style');
+          style.id = 'timer-pulse-style';
+          style.textContent = `
+            @keyframes pulse {
+              0% { transform: translate(-50%, -50%) scale(1); }
+              50% { transform: translate(-50%, -50%) scale(1.1); }
+              100% { transform: translate(-50%, -50%) scale(1); }
+            }
+          `;
+          document.head.appendChild(style);
+        }
+        
+        document.body.appendChild(alertDiv);
+        
+        // Remove visual feedback after 3 seconds
         setTimeout(() => {
           document.body.style.backgroundColor = '';
-        }, 500);
+          document.body.style.transition = '';
+          if (alertDiv.parentNode) {
+            alertDiv.parentNode.removeChild(alertDiv);
+          }
+        }, 3000);
         
         // Try to show browser notification as well
         if ('Notification' in window && Notification.permission === 'granted') {
-          new Notification('Timer Complete!', {
+          new Notification('⏰ Timer Complete!', {
             body: 'Your countdown timer has finished.',
-            icon: '/favicon.ico'
-          });
-        } else if ('Notification' in window && Notification.permission !== 'denied') {
-          Notification.requestPermission().then(permission => {
-            if (permission === 'granted') {
-              new Notification('Timer Complete!', {
-                body: 'Your countdown timer has finished.',
-                icon: '/favicon.ico'
-              });
-            }
+            icon: '/favicon.ico',
+            tag: 'timer-complete' // Prevent duplicate notifications
           });
         }
       });
     } catch (_) {
-      console.warn('All audio methods failed, using visual feedback only');
-      // Absolutely final fallback - just visual
-      document.body.style.backgroundColor = '#fecaca';
+      console.warn('All audio methods failed, using enhanced visual feedback only');
+      // Enhanced visual fallback
+      document.body.style.backgroundColor = '#dc2626';
+      document.body.style.transition = 'background-color 0.2s ease';
+      
+      // Create prominent visual alert
+      const alertDiv = document.createElement('div');
+      alertDiv.innerHTML = '⏰ Timer Complete! 🔔';
+      alertDiv.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: linear-gradient(45deg, #dc2626, #ef4444);
+        color: white;
+        padding: 30px 50px;
+        border-radius: 15px;
+        font-size: 28px;
+        font-weight: bold;
+        z-index: 10000;
+        box-shadow: 0 15px 40px rgba(0,0,0,0.4);
+        text-align: center;
+        border: 3px solid white;
+      `;
+      document.body.appendChild(alertDiv);
+      
+      // Pulsing effect
+      let pulseCount = 0;
+      const pulseInterval = setInterval(() => {
+        alertDiv.style.transform = pulseCount % 2 === 0 
+          ? 'translate(-50%, -50%) scale(1.1)' 
+          : 'translate(-50%, -50%) scale(1)';
+        pulseCount++;
+        if (pulseCount >= 6) { // 3 full pulses
+          clearInterval(pulseInterval);
+        }
+      }, 300);
+      
       setTimeout(() => {
         document.body.style.backgroundColor = '';
-      }, 500);
+        document.body.style.transition = '';
+        if (alertDiv.parentNode) {
+          alertDiv.parentNode.removeChild(alertDiv);
+        }
+      }, 3000);
+    }
+  }
+}
+
+// Play celebration sound for workout completion
+function playWorkoutCompletionSound() {
+  try {
+    // Create audio context
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    
+    // Create a happy ascending melody: C-E-G-C (major triad + octave)
+    const frequencies = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+    const delays = [0, 150, 300, 450]; // Note timings
+    
+    frequencies.forEach((freq, index) => {
+      setTimeout(() => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        
+        // Configure oscillator for a warmer sound
+        o.type = 'sine';
+        o.frequency.value = freq;
+        o.connect(g);
+        g.connect(ctx.destination);
+        g.gain.value = 1.0; // Use system volume
+        
+        // Play with slight decay for musical effect
+        o.start();
+        g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+        setTimeout(() => { 
+          o.stop(); 
+          // Only close context after the last note
+          if (index === frequencies.length - 1) {
+            setTimeout(() => ctx.close(), 100);
+          }
+        }, 400);
+      }, delays[index]);
+    });
+    
+    console.log('Workout completion melody played successfully');
+  } catch (e) {
+    console.warn('WebAudio failed for completion sound, trying fallback:', e);
+    // Fallback: use the same beep as timer but shorter
+    try { 
+      const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmkiBUAAfwA=');
+      // Use system volume instead of setting audio.volume
+      audio.play().then(() => {
+        console.log('Completion fallback audio played successfully');
+      }).catch(() => {
+        console.log('Audio fallback failed for completion sound');
+      });
+    } catch (_) {
+      console.log('All audio methods failed for completion sound');
+    }
+    
+    // Show congratulatory notification
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('🎉 Workout Complete!', {
+        body: 'Great job finishing your workout session!',
+        icon: '/favicon.ico',
+        tag: 'workout-complete'
+      });
     }
   }
 }
@@ -317,8 +453,8 @@ function defaultSession(): ResistanceSession {
     dateISO: toISO(new Date()),
     sessionName: "Workout",
     exercises: [
-      { id: crypto.randomUUID(), name: "Pull-ups", minSets: 3, targetReps: 6, intensity: 0, sets: [0, 0, 0] },
-      { id: crypto.randomUUID(), name: "Push-ups", minSets: 3, targetReps: 12, intensity: 0, sets: [0, 0, 0] },
+      { id: crypto.randomUUID(), name: "Pull-ups", minSets: 3, targetReps: 6, intensity: 0, sets: [0, 0, 0], notes: "" },
+      { id: crypto.randomUUID(), name: "Push-ups", minSets: 3, targetReps: 12, intensity: 0, sets: [0, 0, 0], notes: "" },
     ],
     completed: false,
     sessionTypes: ["Resistance"],
@@ -802,6 +938,16 @@ export default function WorkoutTrackerApp() {
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [showSignIn, setShowSignIn] = useState(false);
+
+  // Request notification permissions on app initialization
+  useEffect(() => {
+    // Request notification permission for timer alarms
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then(permission => {
+        console.log('Notification permission:', permission);
+      });
+    }
+  }, []);
 
   // Username and profile management
   const updateUsername = async (newUsername: string) => {
@@ -1398,11 +1544,24 @@ export default function WorkoutTrackerApp() {
         {/* Floating countdown button */}
         <div className="fixed right-6 bottom-6 z-50">
           <div className="relative">
-            <button className="w-12 h-12 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg" onClick={() => setShowCountdownModal(true)}>
+            <button 
+              className={`w-12 h-12 rounded-full text-white flex items-center justify-center shadow-lg transition-all duration-300 ${
+                countdownRunning && countdownSec <= 10 
+                  ? 'bg-red-600 animate-pulse scale-110' 
+                  : countdownRunning 
+                    ? 'bg-orange-600' 
+                    : 'bg-blue-600'
+              }`} 
+              onClick={() => setShowCountdownModal(true)}
+            >
               ⏱️
             </button>
             {countdownRunning && (
-              <div className="absolute -top-2 -right-2 bg-red-600 text-white text-xs rounded-full px-2 py-0.5">{Math.floor(countdownSec/60)}:{String(countdownSec%60).padStart(2,'0')}</div>
+              <div className={`absolute -top-2 -right-2 text-white text-xs rounded-full px-2 py-0.5 ${
+                countdownSec <= 10 ? 'bg-red-600 animate-pulse' : 'bg-red-600'
+              }`}>
+                {Math.floor(countdownSec/60)}:{String(countdownSec%60).padStart(2,'0')}
+              </div>
             )}
           </div>
         </div>
@@ -2448,7 +2607,7 @@ function WorkoutView({
       ...session,
       exercises: [
         ...session.exercises,
-        { id: crypto.randomUUID(), name: "", minSets: 3, targetReps: 6, intensity: 0, sets: [0, 0, 0] },
+        { id: crypto.randomUUID(), name: "", minSets: 3, targetReps: 6, intensity: 0, sets: [0, 0, 0], notes: "" },
       ],
     });
   };
@@ -2504,6 +2663,9 @@ function WorkoutView({
 
     // Mark session as completed in local state
     setSession({ ...session, completed: true, durationSec: timerSec });
+
+    // Play celebration sound for workout completion
+    playWorkoutCompletionSound();
 
     const today = session.dateISO;
     const todayIndex = weekly.days.findIndex((d) => d.dateISO === today);
@@ -2824,7 +2986,7 @@ function WorkoutView({
               <Button onClick={() => {
                 const found = routines.find((x) => x.id === selectedRoutineId);
                 if (!found) return toasts.push('Select a routine', 'info');
-                const exercises = (found.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, intensity: e.intensity || 0, sets: Array(e.minSets).fill(0) }));
+                const exercises = (found.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, intensity: e.intensity || 0, sets: Array(e.minSets).fill(0), notes: e.notes || "" }));
                 setSession({ ...session, sessionName: found.name, exercises, completed: false, sessionTypes: found.sessionTypes || [], durationSec: 0 });
                 setShowLoadModal(false);
                 setSelectedRoutineId(null);
@@ -3245,8 +3407,27 @@ function ExerciseCard({
                   )}
                 </div>
               </div>
+              {lastWorkout.notes && (
+                <div className="mt-1 text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">
+                  <span className="font-medium">Notes:</span> {lastWorkout.notes}
+                </div>
+              )}
             </div>
           )}
+          
+          {/* Exercise Notes */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-gray-500" />
+              <span className="text-sm font-medium text-gray-700">Notes</span>
+            </div>
+            <Input
+              placeholder="Add notes about this exercise (form cues, weight used, etc.)"
+              value={ex.notes || ''}
+              onChange={(e) => updateExercise(ex.id, { notes: e.target.value })}
+              className="text-sm"
+            />
+          </div>
           
           {/* Helper message for unnamed exercises */}
           {!ex.name.trim() || ex.name === 'New exercise' ? (
@@ -3299,6 +3480,11 @@ function ExerciseCard({
                         <span className="text-xs text-amber-600">I:{personalRecord.intensity}</span>
                       )}
                     </div>
+                    {personalRecord.notes && (
+                      <div className="mt-2 text-xs text-amber-700 bg-amber-100 px-2 py-1 rounded">
+                        <span className="font-medium">Notes:</span> {personalRecord.notes}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -3311,23 +3497,30 @@ function ExerciseCard({
                     </h4>
                     <div className="space-y-2 max-h-40 overflow-y-auto">
                       {recentWorkouts.slice(1).map((workout: any, i: number) => (
-                        <div key={`${workout.sessionId}-${i}`} className="flex items-center justify-between text-sm py-1">
-                          <span className="text-gray-600 font-medium">
-                            {workout.sessionDate.toLocaleDateString()}
-                          </span>
-                          <div className="flex gap-1 items-center">
-                            {(workout.sets || []).map((reps: number, j: number) => (
-                              <span key={j} className="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded text-xs font-medium">
-                                {reps}
-                              </span>
-                            ))}
-                            {workout.intensity && (
-                              <span className="text-gray-500 text-xs ml-1">I:{workout.intensity}</span>
-                            )}
-                            <span className="text-gray-500 text-xs ml-2">
-                              ({(workout.sets || []).reduce((sum: number, reps: number) => sum + reps, 0)} total)
+                        <div key={`${workout.sessionId}-${i}`} className="text-sm py-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-600 font-medium">
+                              {workout.sessionDate.toLocaleDateString()}
                             </span>
+                            <div className="flex gap-1 items-center">
+                              {(workout.sets || []).map((reps: number, j: number) => (
+                                <span key={j} className="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded text-xs font-medium">
+                                  {reps}
+                                </span>
+                              ))}
+                              {workout.intensity && (
+                                <span className="text-gray-500 text-xs ml-1">I:{workout.intensity}</span>
+                              )}
+                              <span className="text-gray-500 text-xs ml-2">
+                                ({(workout.sets || []).reduce((sum: number, reps: number) => sum + reps, 0)} total)
+                              </span>
+                            </div>
                           </div>
+                          {workout.notes && (
+                            <div className="mt-1 text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded">
+                              <span className="font-medium">Notes:</span> {workout.notes}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -3606,7 +3799,7 @@ function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onL
 
   const resetComposer = () => { setComposerName(''); setComposerExercises([]); setEditingId(null); };
 
-  const addComposerExercise = () => setComposerExercises(prev => [...prev, { id: crypto.randomUUID(), name: '', minSets: 3, targetReps: 8, intensity: 0, sets: [0,0,0] }]);
+  const addComposerExercise = () => setComposerExercises(prev => [...prev, { id: crypto.randomUUID(), name: '', minSets: 3, targetReps: 8, intensity: 0, sets: [0,0,0], notes: '' }]);
 
   const editRoutine = (routine: any) => {
     // Only allow editing routines (not individual exercises) and only if user owns them
@@ -4064,39 +4257,54 @@ function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onL
           
           <div className="space-y-3">
             {composerExercises.map((ex, idx) => (
-              <div key={ex.id} className="flex gap-3 items-center p-3 bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-colors">
-                <div className="flex-1">
+              <div key={ex.id} className="p-3 bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-colors space-y-3">
+                <div className="flex gap-3 items-center">
+                  <div className="flex-1">
+                    <Input 
+                      value={ex.name} 
+                      placeholder="New exercise" 
+                      onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], name: e.target.value }; return c; })}
+                      className="font-medium border-0 bg-transparent p-0 focus:ring-0"
+                    />
+                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={() => setComposerExercises(prev => prev.filter(p => p.id !== ex.id))}
+                    className="text-gray-400 hover:text-red-500 hover:bg-red-50 shrink-0"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="flex items-center gap-4 text-sm text-gray-600">
+                  <div className="flex items-center gap-2">
+                    <span>Sets:</span>
+                    <Input 
+                      type="number" 
+                      value={String(ex.minSets)} 
+                      onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], minSets: Math.max(1, parseInt(e.target.value||'1')) }; return c; })} 
+                      className="w-16 text-center border-gray-200"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span>Reps:</span>
+                    <Input 
+                      type="number" 
+                      value={String(ex.targetReps)} 
+                      onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], targetReps: Math.max(1, parseInt(e.target.value||'1')) }; return c; })} 
+                      className="w-16 text-center border-gray-200"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-gray-400" />
                   <Input 
-                    value={ex.name} 
-                    placeholder="New exercise" 
-                    onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], name: e.target.value }; return c; })}
-                    className="font-medium border-0 bg-transparent p-0 focus:ring-0"
+                    placeholder="Notes (optional)" 
+                    value={ex.notes || ''} 
+                    onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], notes: e.target.value }; return c; })}
+                    className="text-sm border-gray-200"
                   />
                 </div>
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <span>Sets:</span>
-                  <Input 
-                    type="number" 
-                    value={String(ex.minSets)} 
-                    onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], minSets: Math.max(1, parseInt(e.target.value||'1')) }; return c; })} 
-                    className="w-16 text-center border-gray-200"
-                  />
-                  <span>Reps:</span>
-                  <Input 
-                    type="number" 
-                    value={String(ex.targetReps)} 
-                    onChange={(e) => setComposerExercises(prev => { const c = [...prev]; c[idx] = { ...c[idx], targetReps: Math.max(1, parseInt(e.target.value||'1')) }; return c; })} 
-                    className="w-16 text-center border-gray-200"
-                  />
-                </div>
-                <Button 
-                  variant="ghost" 
-                  size="sm"
-                  onClick={() => setComposerExercises(prev => prev.filter(p => p.id !== ex.id))}
-                  className="text-gray-400 hover:text-red-500 hover:bg-red-50 shrink-0"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
               </div>
             ))}
             <Button 
@@ -4281,7 +4489,7 @@ function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onL
                       <Button 
                         size="sm"
                         onClick={() => {
-                          const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
+                          const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0), notes: e.notes || "" }));
                           onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id });
                         }}
                         className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-sm"
@@ -4294,7 +4502,7 @@ function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onL
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0) }));
+                          const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0), notes: e.notes || "" }));
                           onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id }, 'append');
                         }} 
                         title="Add all exercises from this routine to current workout"
@@ -4313,7 +4521,7 @@ function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onL
                         size="sm"
                         onClick={() => {
                           // For individual exercises, add them to current session
-                          const exercise = { id: crypto.randomUUID(), name: it.name, minSets: it.minSets || 3, targetReps: it.targetReps || 8, sets: Array(it.minSets || 3).fill(0) };
+                          const exercise = { id: crypto.randomUUID(), name: it.name, minSets: it.minSets || 3, targetReps: it.targetReps || 8, sets: Array(it.minSets || 3).fill(0), notes: it.notes || "" };
                           onLoadRoutine({ dateISO: toISO(new Date()), sessionName: 'Current Session', exercises: [exercise], completed: false, sessionTypes: [], durationSec: 0 }, 'append');
                         }}
                         className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-sm"
