@@ -214,147 +214,149 @@ function normalizeWeekly(w: WeeklyPlan): WeeklyPlan {
 }
 
 // Play three progressive beeps using WebAudio API
-function playBeep() {
+// Global audio context for better browser compatibility
+let globalAudioContext: AudioContext | null = null;
+let audioInitialized = false;
+
+function getAudioContext(): AudioContext | null {
+  if (!globalAudioContext) {
+    try {
+      globalAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    } catch (e) {
+      console.warn('Could not create AudioContext:', e);
+      return null;
+    }
+  }
+  return globalAudioContext;
+}
+
+// Initialize audio on first user interaction
+function initializeAudio() {
+  if (audioInitialized) return;
+  
+  const ctx = getAudioContext();
+  if (ctx && ctx.state === 'suspended') {
+    ctx.resume().then(() => {
+      console.log('Audio context resumed successfully');
+      audioInitialized = true;
+    }).catch((e) => {
+      console.warn('Failed to resume audio context:', e);
+    });
+  } else if (ctx) {
+    audioInitialized = true;
+  }
+}
+
+async function playBeep() {
+  console.log('Timer finished - attempting to play alarm sound');
   try {
-    // Create audio context
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const ctx = getAudioContext();
+    if (!ctx) throw new Error('No audio context available');
+    
+    // Resume context if suspended (required by modern browsers)
+    if (ctx.state === 'suspended') {
+      console.log('Audio context suspended, attempting to resume...');
+      await ctx.resume();
+      console.log('Audio context resumed');
+    }
     
     // Create four beeps with consistent system volume
     const delays = [0, 200, 400, 600]; // Start times in milliseconds
     
-    delays.forEach((delay, index) => {
+    delays.forEach((delay) => {
       setTimeout(() => {
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        
-        // Configure oscillator
-        o.type = 'sine';
-        o.frequency.value = 880; // A5 note
-        o.connect(g);
-        g.connect(ctx.destination);
-        // Use system volume - no artificial volume reduction
-        g.gain.value = 1.0;
-        
-        // Play short burst
-        o.start();
-        setTimeout(() => { 
-          o.stop(); 
-          // Only close context after the last beep
-          if (index === delays.length - 1) {
-            setTimeout(() => ctx.close(), 50);
-          }
-        }, 150); // Short 150ms burst
+        try {
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          
+          // Configure oscillator
+          o.type = 'sine';
+          o.frequency.value = 880; // A5 note
+          o.connect(g);
+          g.connect(ctx.destination);
+          // Use system volume - no artificial volume reduction
+          g.gain.value = 1.0;
+          
+          // Play short burst
+          o.start();
+          setTimeout(() => { 
+            try {
+              o.stop();
+            } catch (e) {
+              // Ignore if already stopped
+            }
+          }, 150); // Short 150ms burst
+        } catch (e) {
+          console.warn('Individual beep failed:', e);
+        }
       }, delay);
     });
     
-    console.log('Timer triple beep played successfully');
+    console.log('Timer beep played successfully');
   } catch (e) {
-    console.warn('WebAudio failed, trying fallback:', e);
-    // Enhanced fallback: try multiple audio approaches
+    console.warn('WebAudio failed, trying HTML5 Audio fallback:', e);
+    // Enhanced fallback: try HTML5 Audio with multiple beeps
     try { 
-      // Try with a simple audio URL beep
-      const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmkiBUAAfwA=');
-      // Use system volume - no artificial volume reduction
-      audio.play().then(() => {
-        console.log('Fallback audio played successfully');
-      }).catch(() => {
-        console.warn('Audio fallback failed, using visual feedback');
-        // Enhanced visual feedback with pulsing animation
-        document.body.style.backgroundColor = '#dc2626';
-        document.body.style.transition = 'background-color 0.2s ease';
-        
-        // Create a more prominent visual indicator
-        const alertDiv = document.createElement('div');
-        alertDiv.innerHTML = '⏰ Timer Complete!';
-        alertDiv.style.cssText = `
-          position: fixed;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          background: #dc2626;
-          color: white;
-          padding: 20px 40px;
-          border-radius: 10px;
-          font-size: 24px;
-          font-weight: bold;
-          z-index: 10000;
-          box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-          animation: pulse 1s infinite;
-        `;
-        
-        // Add pulse animation
-        if (!document.getElementById('timer-pulse-style')) {
-          const style = document.createElement('style');
-          style.id = 'timer-pulse-style';
-          style.textContent = `
-            @keyframes pulse {
-              0% { transform: translate(-50%, -50%) scale(1); }
-              50% { transform: translate(-50%, -50%) scale(1.1); }
-              100% { transform: translate(-50%, -50%) scale(1); }
-            }
-          `;
-          document.head.appendChild(style);
-        }
-        
-        document.body.appendChild(alertDiv);
-        
-        // Remove visual feedback after 3 seconds
+      console.log('Attempting HTML5 Audio fallback...');
+      const audioURL = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmkiBUAAfwA=';
+      
+      // Play multiple beeps to match WebAudio version
+      const delays = [0, 200, 400, 600];
+      delays.forEach((delay) => {
         setTimeout(() => {
-          document.body.style.backgroundColor = '';
-          document.body.style.transition = '';
-          if (alertDiv.parentNode) {
-            alertDiv.parentNode.removeChild(alertDiv);
-          }
-        }, 3000);
-        
-        // Try to show browser notification as well
-        if ('Notification' in window && Notification.permission === 'granted') {
-          new Notification('⏰ Timer Complete!', {
-            body: 'Your countdown timer has finished.',
-            icon: '/favicon.ico',
-            tag: 'timer-complete' // Prevent duplicate notifications
+          const audio = new Audio(audioURL);
+          // Use system volume - no artificial volume reduction
+          audio.play().then(() => {
+            console.log(`HTML5 Audio beep ${delay}ms played successfully`);
+          }).catch((err) => {
+            console.warn(`HTML5 Audio beep ${delay}ms failed:`, err);
           });
-        }
+        }, delay);
       });
-    } catch (_) {
-      console.warn('All audio methods failed, using enhanced visual feedback only');
-      // Enhanced visual fallback
+      
+      console.log('HTML5 Audio fallback initiated');
+    } catch (fallbackError) {
+      console.warn('HTML5 Audio fallback also failed:', fallbackError);
+      // Visual fallback when all audio fails
       document.body.style.backgroundColor = '#dc2626';
       document.body.style.transition = 'background-color 0.2s ease';
       
-      // Create prominent visual alert
+      // Create a more prominent visual indicator
       const alertDiv = document.createElement('div');
-      alertDiv.innerHTML = '⏰ Timer Complete! 🔔';
+      alertDiv.innerHTML = '⏰ Timer Complete!';
       alertDiv.style.cssText = `
         position: fixed;
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%);
-        background: linear-gradient(45deg, #dc2626, #ef4444);
+        background: #dc2626;
         color: white;
-        padding: 30px 50px;
-        border-radius: 15px;
-        font-size: 28px;
+        padding: 20px 40px;
+        border-radius: 10px;
+        font-size: 24px;
         font-weight: bold;
         z-index: 10000;
-        box-shadow: 0 15px 40px rgba(0,0,0,0.4);
-        text-align: center;
-        border: 3px solid white;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        animation: pulse 1s infinite;
       `;
+      
+      // Add pulse animation
+      if (!document.getElementById('timer-pulse-style')) {
+        const style = document.createElement('style');
+        style.id = 'timer-pulse-style';
+        style.textContent = `
+          @keyframes pulse {
+            0% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.1); }
+            100% { transform: translate(-50%, -50%) scale(1); }
+          }
+        `;
+        document.head.appendChild(style);
+      }
+      
       document.body.appendChild(alertDiv);
       
-      // Pulsing effect
-      let pulseCount = 0;
-      const pulseInterval = setInterval(() => {
-        alertDiv.style.transform = pulseCount % 2 === 0 
-          ? 'translate(-50%, -50%) scale(1.1)' 
-          : 'translate(-50%, -50%) scale(1)';
-        pulseCount++;
-        if (pulseCount >= 6) { // 3 full pulses
-          clearInterval(pulseInterval);
-        }
-      }, 300);
-      
+      // Remove visual feedback after 3 seconds
       setTimeout(() => {
         document.body.style.backgroundColor = '';
         document.body.style.transition = '';
@@ -362,6 +364,15 @@ function playBeep() {
           alertDiv.parentNode.removeChild(alertDiv);
         }
       }, 3000);
+      
+      // Try to show browser notification as well
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('⏰ Timer Complete!', {
+          body: 'Your countdown timer has finished.',
+          icon: '/favicon.ico',
+          tag: 'timer-complete' // Prevent duplicate notifications
+        });
+      }
     }
   }
 }
@@ -1252,6 +1263,29 @@ export default function WorkoutTrackerApp() {
     return () => unsub();
   }, []);
 
+  // Initialize audio context on user interaction
+  useEffect(() => {
+    const handleUserInteraction = () => {
+      initializeAudio();
+      // Remove listeners after first interaction
+      document.removeEventListener('click', handleUserInteraction);
+      document.removeEventListener('keydown', handleUserInteraction);
+      document.removeEventListener('touchstart', handleUserInteraction);
+    };
+
+    // Add event listeners for user interaction
+    document.addEventListener('click', handleUserInteraction);
+    document.addEventListener('keydown', handleUserInteraction);
+    document.addEventListener('touchstart', handleUserInteraction);
+
+    // Cleanup
+    return () => {
+      document.removeEventListener('click', handleUserInteraction);
+      document.removeEventListener('keydown', handleUserInteraction);
+      document.removeEventListener('touchstart', handleUserInteraction);
+    };
+  }, []);
+
   // autosave to Firestore
   useEffect(() => {
     // don't autosave until we've loaded the initial state from Firestore
@@ -1547,14 +1581,22 @@ export default function WorkoutTrackerApp() {
             <button 
               className={`w-12 h-12 rounded-full text-white flex items-center justify-center shadow-lg transition-all duration-300 ${
                 countdownRunning && countdownSec <= 10 
-                  ? 'bg-red-600 animate-pulse scale-110' 
+                  ? 'bg-red-600 animate-pulse scale-125' 
                   : countdownRunning 
-                    ? 'bg-orange-600' 
+                    ? 'bg-orange-600 scale-115' 
                     : 'bg-blue-600'
               }`} 
               onClick={() => setShowCountdownModal(true)}
             >
-              ⏱️
+              <span className={`transition-all duration-300 ${
+                countdownRunning && countdownSec <= 10 
+                  ? 'text-3xl' 
+                  : countdownRunning 
+                    ? 'text-2xl' 
+                    : 'text-xl'
+              }`}>
+                ⏱️
+              </span>
             </button>
             {countdownRunning && (
               <div className={`absolute -top-2 -right-2 text-white text-xs rounded-full px-2 py-0.5 ${
