@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, Check, Save, Bookmark, Edit, Search, Dumbbell, User, Grid3X3, Target, ChevronDown, Settings, LogOut, MessageSquare } from "lucide-react";
+import { Plus, Trash2, Check, Save, Bookmark, Edit, Search, Dumbbell, User, Grid3X3, Target, ChevronDown, ChevronRight, Settings, LogOut, MessageSquare } from "lucide-react";
 import { ToastContainer } from "@/components/ui/toast";
 
 // Expose Firebase objects globally for console access
@@ -91,6 +91,11 @@ function weekDates(monday: Date): Date[] {
 
 function cn(...classes: (string | false | undefined)[]) {
   return classes.filter(Boolean).join(" ");
+}
+
+// Helper function to compare arrays for equality
+function arraysEqual<T>(a: T[], b: T[]): boolean {
+  return a.length === b.length && a.every((val, index) => val === b[index]);
 }
 
 // Safe stringify helper for debugging (handles circulars)
@@ -778,6 +783,16 @@ function PreviousWeekTracker({
 // --- Components ---
 export default function WorkoutTrackerApp() {
   const [weekly, setWeekly] = useState<WeeklyPlan>(defaultWeekly());
+  console.debug('[WT] Initial weekly state:', { weekOfISO: weekly.weekOfISO, mondayFromState: new Date(weekly.weekOfISO).toDateString() });
+  
+  // Track whenever weekly state changes
+  useEffect(() => {
+    console.debug('[WT] Weekly state changed:', { 
+      weekOfISO: weekly.weekOfISO, 
+      mondayFromState: new Date(weekly.weekOfISO).toDateString(),
+      stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n') 
+    });
+  }, [weekly.weekOfISO]);
   const [previousWeeks, setPreviousWeeks] = useState<WeeklyPlan[]>([]);
   const [session, setSession] = useState<ResistanceSession>(defaultSession());
   const [userId, setUserId] = useState<string | null>(null);
@@ -864,15 +879,40 @@ export default function WorkoutTrackerApp() {
           }
           // Prefer per-week document keyed by weekOfISO. Fall back to the legacy 'tracker' doc.
           try {
-            const weekRef = doc(db, 'users', u.uid, 'state', toISO(getMonday()));
+            const currentMonday = getMonday();
+            const currentWeekISO = toISO(currentMonday);
+            console.debug('[WT] Loading current week:', { currentMonday: currentMonday.toDateString(), currentWeekISO });
+            const weekRef = doc(db, 'users', u.uid, 'state', currentWeekISO);
             const wSnap = await getDoc(weekRef);
             if (wSnap.exists()) {
               const data = wSnap.data() as PersistedState;
+              console.debug('[WT] Found existing weekly data for current week:', { weekISO: currentWeekISO, data });
               if (data?.weekly) {
                 // dedupe types and normalize
                 const uniq = ensureUniqueTypes(data.weekly.customTypes || []);
-                  let normalized = normalizeWeekly({ ...data.weekly, customTypes: uniq } as WeeklyPlan);
-                  console.debug('[WT] Loaded per-week state (raw)', safeString({ uid: u.uid, week: toISO(getMonday()), normalized }));
+                let normalized = normalizeWeekly({ ...data.weekly, customTypes: uniq, weekOfISO: currentWeekISO } as WeeklyPlan);
+                
+                // Ensure days array matches current week dates
+                const currentWeekDates = weekDates(currentMonday).map(d => toISO(d));
+                const existingDates = normalized.days.map(d => d.dateISO);
+                
+                if (!arraysEqual(currentWeekDates, existingDates)) {
+                  console.debug('[WT] Days mismatch, regenerating for current week:', { expected: currentWeekDates, found: existingDates });
+                  // Create new days array with current week dates, preserving existing data where possible
+                  const newDays = currentWeekDates.map(dateISO => {
+                    const existingDay = normalized.days.find(d => d.dateISO === dateISO);
+                    return existingDay || {
+                      dateISO,
+                      types: {},
+                      sessions: 0,
+                      sessionsList: [],
+                      comments: {}
+                    };
+                  });
+                  normalized = { ...normalized, days: newDays };
+                }
+                
+                console.debug('[WT] Loaded per-week state (corrected)', safeString({ uid: u.uid, week: currentWeekISO, normalized, correctedWeekOfISO: normalized.weekOfISO }));
                   // if the loaded weekly has no customTypes, merge defaults from local/global settings
                   if (!normalized.customTypes || normalized.customTypes.length === 0) {
                     const globals = loadGlobalTypes();
@@ -975,17 +1015,50 @@ export default function WorkoutTrackerApp() {
               }
               if (data?.session) setSession(data.session);
             } else {
+              console.debug('[WT] No current week data found, checking legacy tracker doc');
               // fallback to legacy tracker doc
               const ref = doc(db, "users", u.uid, "state", "tracker");
               const snap = await getDoc(ref);
               if (snap.exists()) {
                 const data = snap.data() as PersistedState;
+                console.debug('[WT] Found legacy tracker data:', { data });
                 if (data?.weekly) {
-                  const normalized = normalizeWeekly({ ...data.weekly, customTypes: ensureUniqueTypes(data.weekly.customTypes || []) } as WeeklyPlan);
-                  console.debug('[WT] Loaded legacy tracker state', { uid: u.uid, normalized });
+                  // Apply same week correction logic as current week loading
+                  const normalized = normalizeWeekly({ 
+                    ...data.weekly, 
+                    customTypes: ensureUniqueTypes(data.weekly.customTypes || []),
+                    weekOfISO: currentWeekISO // Force current week ISO
+                  } as WeeklyPlan);
+                  
+                  // Ensure days array matches current week dates
+                  const currentWeekDates = weekDates(currentMonday).map(d => toISO(d));
+                  const existingDates = normalized.days.map(d => d.dateISO);
+                  
+                  if (!arraysEqual(currentWeekDates, existingDates)) {
+                    console.debug('[WT] Legacy data days mismatch, regenerating for current week:', { expected: currentWeekDates, found: existingDates });
+                    // Create new days array with current week dates, preserving existing data where possible
+                    const newDays = currentWeekDates.map(dateISO => {
+                      const existingDay = normalized.days.find(d => d.dateISO === dateISO);
+                      return existingDay || {
+                        dateISO,
+                        types: {},
+                        sessions: 0,
+                        sessionsList: [],
+                        comments: {}
+                      };
+                    });
+                    normalized.days = newDays;
+                  }
+                  
+                  console.debug('[WT] Loaded legacy tracker state (corrected)', { uid: u.uid, normalized, correctedWeekOfISO: normalized.weekOfISO });
                   setWeekly(normalized);
                 }
                 if (data?.session) setSession(data.session);
+              } else {
+                console.debug('[WT] No legacy tracker data found, using defaultWeekly()');
+                const defaultWk = defaultWeekly();
+                console.debug('[WT] Generated defaultWeekly:', { weekOfISO: defaultWk.weekOfISO, monday: getMonday().toDateString() });
+                setWeekly(defaultWk);
               }
             }
           } catch (e) {
@@ -1739,6 +1812,33 @@ function WeeklyTracker({
           <p className="text-sm text-slate-600">Click cells to toggle what you did each day.</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => {
+            // Reset to current week
+            const currentMon = getMonday();
+            const currentWeekISO = toISO(currentMon);
+            const currentWeekDates = weekDates(currentMon).map(d => toISO(d));
+            
+            const newWeekly: WeeklyPlan = {
+              ...weekly,
+              weekOfISO: currentWeekISO,
+              days: currentWeekDates.map(dateISO => {
+                const existingDay = weekly.days.find(d => d.dateISO === dateISO);
+                return existingDay || {
+                  dateISO,
+                  types: {},
+                  sessions: 0,
+                  sessionsList: [],
+                  comments: {}
+                };
+              })
+            };
+            
+            console.debug('[WT] Resetting to current week:', { old: weekly.weekOfISO, new: currentWeekISO });
+            setWeekly(newWeekly);
+            push?.('Reset to current week', 'success');
+          }}>
+            Reset to Current Week
+          </Button>
           <Button variant="outline" onClick={async () => {
             // copy previous week from Firestore if signed in
             const uid = auth.currentUser?.uid;
@@ -2204,6 +2304,62 @@ function WorkoutView({
   const [showLoadModal, setShowLoadModal] = useState(false);
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
   const [sessionFavorited, setSessionFavorited] = useState<boolean>(false);
+
+  // Helper function to create test data for exercise history
+  const createTestSession = async () => {
+    try {
+      const uid = auth.currentUser?.uid;
+      if (!uid) {
+        toasts.push('Please log in first', 'error');
+        return;
+      }
+
+      console.log('Creating test session...');
+      const testSession = {
+        sessionName: "Test Workout Session",
+        completedAt: Date.now() - (24 * 60 * 60 * 1000), // Yesterday
+        exercises: [
+          {
+            id: 'test1',
+            name: 'Push ups',
+            sets: [12, 10, 8],
+            minSets: 3,
+            targetReps: 10,
+            intensity: 7
+          },
+          {
+            id: 'test2', 
+            name: 'Squats',
+            sets: [15, 12, 10],
+            minSets: 3,
+            targetReps: 12,
+            intensity: 8
+          },
+          {
+            id: 'test3',
+            name: 'Pull ups',
+            sets: [8, 6, 5],
+            minSets: 3,
+            targetReps: 8,
+            intensity: 9
+          }
+        ],
+        sessionTypes: ["Resistance"],
+        notes: "Test session for exercise history",
+        dateISO: new Date(Date.now() - (24 * 60 * 60 * 1000)).toISOString().split('T')[0]
+      };
+
+      console.log('Test session data:', testSession);
+      const sessionRef = collection(db, 'users', uid, 'sessions');
+      const docRef = await addDoc(sessionRef, testSession);
+      console.log('Test session created with ID:', docRef.id);
+      
+      toasts.push('✅ Test session created! Now try typing "Push ups", "Squats", or "Pull ups" in a new exercise.', 'success');
+    } catch (error) {
+      console.error('Failed to create test session:', error);
+      toasts.push('Failed to create test session', 'error');
+    }
+  };
   
   // Save routine dialog state
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
@@ -2615,6 +2771,9 @@ function WorkoutView({
         <Button variant="outline" onClick={loadRoutines}>
           Load Routine
         </Button>
+        <Button variant="outline" onClick={createTestSession} className="bg-blue-50 text-blue-700 border-blue-200">
+          🧪 Create Test Data
+        </Button>
         <Button 
           variant="secondary" 
           onClick={() => {
@@ -2750,9 +2909,239 @@ function ExerciseCard({
   const totalTarget = ex.minSets * ex.targetReps;
   const goalMet = allFirstNMeet || sum >= totalTarget;
 
-  // Exercise history - empty by default, populated from Firestore when available
-  const lastWorkout: number[] = []; // Will be populated from Firestore
-  const personalRecord: number[] = []; // Will be populated from Firestore
+  // Exercise history state
+  const [exerciseHistory, setExerciseHistory] = useState<{lastWorkout?: any; personalRecord?: any; recentWorkouts?: any[]}>({});
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  // Load exercise history
+  useEffect(() => {
+    const loadHistory = async () => {
+      // Don't load history for invalid exercise names
+      const exerciseName = ex.name.trim();
+      const isValidExerciseName = exerciseName && 
+        exerciseName !== 'Min sets' && 
+        exerciseName !== 'Target reps' && 
+        exerciseName !== 'Intensity' &&
+        exerciseName !== 'New exercise' &&
+        exerciseName.length >= 2; // Minimum length check
+      
+      if (!isValidExerciseName || historyLoading) {
+        console.log('Skipping history load for invalid exercise name:', exerciseName);
+        setExerciseHistory({});
+        return;
+      }
+      
+      console.log('Loading history for exercise:', exerciseName);
+      console.log('🔍 Debug: Exercise name validation passed for:', exerciseName);
+      setHistoryLoading(true);
+      try {
+        const uid = auth.currentUser?.uid;
+        if (!uid) {
+          console.log('❌ No user authenticated');
+          return;
+        }
+        
+        console.log('✅ User authenticated, uid:', uid);
+        
+        // Query sessions that contain this exercise
+        const sessionsRef = collection(db, 'users', uid, 'sessions');
+        const snaps = await getDocs(sessionsRef);
+        console.log('Found', snaps.docs.length, 'total sessions');
+        
+        // Debug: Log all sessions
+        console.log('Found', snaps.docs.length, 'total sessions for exercise:', ex.name);
+        const sessionsWithExercises = snaps.docs.filter(doc => {
+          const data = doc.data();
+          return data.exercises && data.exercises.length > 0;
+        });
+        console.log('Sessions with exercises:', sessionsWithExercises.length);
+        
+        if (sessionsWithExercises.length > 0) {
+          console.log('📋 All available exercise names in database:');
+          const allExerciseNames = new Set();
+          sessionsWithExercises.forEach(doc => {
+            const data = doc.data();
+            data.exercises?.forEach((e: any) => {
+              const cleanName = (e.name || '').replace(/['"]/g, '').trim();
+              allExerciseNames.add(cleanName);
+            });
+          });
+          console.log([...allExerciseNames].sort());
+          console.log('🎯 Searching for:', exerciseName);
+          
+          // Special debugging for specific exercises
+          if (exerciseName.toLowerCase().includes('bodyweight') || exerciseName.toLowerCase().includes('ring')) {
+            console.log('🚨 SPECIAL DEBUG for', exerciseName);
+            console.log('Available names that might match:');
+            Array.from(allExerciseNames).forEach((name) => {
+              const nameStr = String(name);
+              if (nameStr.toLowerCase().includes('bodyweight') || nameStr.toLowerCase().includes('ring') || nameStr.toLowerCase().includes('row') || nameStr.toLowerCase().includes('rollout')) {
+                console.log('  - "' + nameStr + '"');
+              }
+            });
+          }
+        }
+        
+        const matchingSessions = snaps.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter((session: any) => {
+            // Only include completed sessions
+            const hasCompletedAt = !!session.completedAt;
+            const hasMatchingExercise = session.exercises?.some((e: any) => {
+              // Clean exercise names by removing quotes and normalizing
+              const cleanStoredName = (e.name || '').replace(/['"]/g, '').toLowerCase().trim();
+              const cleanSearchName = exerciseName.toLowerCase().trim();
+              
+              // Debug logging for specific exercises
+              if (exerciseName.toLowerCase().includes('bodyweight') || exerciseName.toLowerCase().includes('ring')) {
+                console.log(`🔍 Comparing stored: "${cleanStoredName}" with search: "${cleanSearchName}"`);
+              }
+              
+              // Exact match
+              if (cleanStoredName === cleanSearchName) {
+                console.log(`✅ Exact match found: "${cleanStoredName}" === "${cleanSearchName}"`);
+                return true;
+              }
+              
+              // Fuzzy matching for common variations
+              const storedWords = cleanStoredName.split(/\s+/);
+              const searchWords = cleanSearchName.split(/\s+/);
+              
+              // Handle singular/plural variations
+              const normalize = (word: string) => word.replace(/s$/, ''); // Remove trailing 's'
+              
+              // Check if all search words match stored words (with fuzzy matching)
+              const fuzzyMatch = searchWords.every((searchWord: string) => 
+                storedWords.some((storedWord: string) => 
+                  normalize(storedWord) === normalize(searchWord) || 
+                  storedWord === searchWord ||
+                  searchWord === storedWord
+                )
+              );
+              
+              if (fuzzyMatch && (exerciseName.toLowerCase().includes('bodyweight') || exerciseName.toLowerCase().includes('ring'))) {
+                console.log(`✅ Fuzzy match found: "${cleanStoredName}" ~= "${cleanSearchName}"`);
+              }
+              
+              return fuzzyMatch;
+            });
+            console.log('Session', session.id, 'completed:', hasCompletedAt, 'has matching exercise for "' + ex.name + '":', hasMatchingExercise);
+            if (session.exercises) {
+              console.log('  Exercise names in session:', session.exercises.map((e: any) => '"' + e.name + '"'));
+            }
+            return hasCompletedAt && hasMatchingExercise;
+          })
+          .sort((a: any, b: any) => (b.completedAt || 0) - (a.completedAt || 0));
+
+        console.log('Found', matchingSessions.length, 'matching completed sessions');
+
+        if (matchingSessions.length > 0) {
+          // Get the exercise data from matching sessions
+          const exerciseInstances = matchingSessions.map((session: any) => {
+            const exercise = session.exercises.find((e: any) => {
+              const cleanStoredName = (e.name || '').replace(/['"]/g, '').toLowerCase().trim();
+              const cleanSearchName = ex.name.toLowerCase().trim();
+              
+              // Exact match
+              if (cleanStoredName === cleanSearchName) return true;
+              
+              // Fuzzy matching for common variations
+              const storedWords = cleanStoredName.split(/\s+/);
+              const searchWords = cleanSearchName.split(/\s+/);
+              
+              // Handle singular/plural variations
+              const normalize = (word: string) => word.replace(/s$/, ''); // Remove trailing 's'
+              
+              // Check if all search words match stored words (with fuzzy matching)
+              return searchWords.every((searchWord: string) => 
+                storedWords.some((storedWord: string) => 
+                  normalize(storedWord) === normalize(searchWord) || 
+                  storedWord === searchWord ||
+                  searchWord === storedWord
+                )
+              );
+            });
+            return {
+              ...exercise,
+              sessionDate: new Date(session.completedAt),
+              sessionName: session.sessionName,
+              sessionId: session.id
+            };
+          }).filter(Boolean);
+
+          console.log('Exercise instances found:', exerciseInstances);
+
+          // Find last workout (most recent completed)
+          const lastWorkout = exerciseInstances[0];
+          
+          // Find personal record (highest total reps)
+          const personalRecord = exerciseInstances.reduce((best, current) => {
+            const currentTotal = (current.sets || []).reduce((sum: number, reps: number) => sum + reps, 0);
+            const bestTotal = (best?.sets || []).reduce((sum: number, reps: number) => sum + reps, 0);
+            return currentTotal > bestTotal ? current : best;
+          }, null);
+
+          // Get recent workouts (last 5 completed sessions, excluding duplicates)
+          const uniqueSessions = new Map();
+          exerciseInstances.forEach(instance => {
+            const key = `${instance.sessionId}-${instance.sessionDate.getTime()}`;
+            if (!uniqueSessions.has(key)) {
+              uniqueSessions.set(key, instance);
+            }
+          });
+          const recentWorkouts = Array.from(uniqueSessions.values()).slice(0, 5);
+
+          const historyData = {
+            lastWorkout,
+            personalRecord: personalRecord?.sets?.length ? personalRecord : null,
+            recentWorkouts
+          };
+          
+          console.log('Setting exercise history:', historyData);
+          setExerciseHistory(historyData);
+        } else {
+          // Clear history if no completed sessions found
+          console.log('No completed sessions found, clearing history');
+          setExerciseHistory({});
+        }
+      } catch (error) {
+        console.error('Failed to load exercise history:', error);
+      } finally {
+        setHistoryLoading(false);
+      }
+    };
+
+    // Only load history for valid exercise names
+    const exerciseName = ex.name.trim();
+    const isValidExerciseName = exerciseName && 
+      exerciseName !== 'Min sets' && 
+      exerciseName !== 'Target reps' && 
+      exerciseName !== 'Intensity' &&
+      exerciseName !== 'New exercise' &&
+      exerciseName.length >= 2;
+      
+    if (isValidExerciseName) {
+      loadHistory();
+    } else {
+      // Clear history for invalid names
+      setExerciseHistory({});
+    }
+  }, [ex.name]);
+
+  const { lastWorkout, personalRecord, recentWorkouts } = exerciseHistory;
+  const hasHistory = lastWorkout || personalRecord || (recentWorkouts && recentWorkouts.length > 0);
+
+  // Debug: Log exercise data
+  console.log('🏋️ ExerciseCard render:', {
+    id: ex.id,
+    name: `"${ex.name}"`,
+    nameLength: ex.name?.length || 0,
+    minSets: ex.minSets,
+    targetReps: ex.targetReps,
+    intensity: ex.intensity,
+    sets: ex.sets
+  });
 
   return (
     <Card className={cn(
@@ -2761,12 +3150,15 @@ function ExerciseCard({
     )}>
       <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
-          <Input
-            value={ex.name}
-            onChange={(e) => updateExercise(ex.id, { name: e.target.value })}
-            placeholder="New exercise"
-            className="max-w-xs"
-          />
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500 font-medium">Exercise Name</label>
+            <Input
+              value={ex.name || ""}
+              onChange={(e) => updateExercise(ex.id, { name: e.target.value })}
+              placeholder="Enter exercise name (e.g., Push ups, Bodyweight Row)"
+              className="max-w-xs min-w-[200px] border-2"
+            />
+          </div>
           <div className="flex items-center gap-2 text-sm">
             <label className="text-neutral-600">Min sets</label>
             <Input
@@ -2807,69 +3199,142 @@ function ExerciseCard({
         </div>
       </CardHeader>
       <CardContent>
-        <div className="flex flex-wrap gap-2 items-center">
-          {ex.sets.map((rep, i) => (
-            <div key={i} className="flex items-center gap-1">
-              <Input
-                type="number"
-                className={cn(
-                  "w-20 text-center",
-                  setOK(rep) && "bg-green-50 border-green-400 text-green-900"
+        <div className="space-y-3">
+          {/* Current Sets Input */}
+          <div className="flex flex-wrap gap-2 items-start">
+            {ex.sets.map((rep, i) => (
+              <div key={i} className="flex flex-col items-center gap-1">
+                <div className="flex items-center gap-1">
+                  <Input
+                    type="number"
+                    className={cn(
+                      "w-20 text-center",
+                      setOK(rep) && "bg-green-50 border-green-400 text-green-900"
+                    )}
+                    value={rep}
+                    onChange={(e) => updateSet(ex.id, i, Math.max(0, parseInt(e.target.value || "0")))}
+                  />
+                  <Button variant="secondary" size="icon" onClick={() => removeSet(ex.id, i)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+                {/* Previous session data directly below each input */}
+                {lastWorkout && lastWorkout.sets && lastWorkout.sets[i] !== undefined && (
+                  <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-200 min-w-[20px] text-center">
+                    {lastWorkout.sets[i]}
+                  </div>
                 )}
-                value={rep}
-                onChange={(e) => updateSet(ex.id, i, Math.max(0, parseInt(e.target.value || "0")))}
-              />
-              <Button variant="secondary" size="icon" onClick={() => removeSet(ex.id, i)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              </div>
+            ))}
+            <Button onClick={() => addSet(ex.id)} className="mt-0">
+              <Plus className="mr-2 h-4 w-4"/> Add set
+            </Button>
+          </div>
+
+          {/* Last Session Reference Summary */}
+          {lastWorkout && lastWorkout.sets && lastWorkout.sets.length > 0 && (
+            <div className="text-xs text-blue-700 bg-blue-50 px-3 py-2 rounded border border-blue-200">
+              <div className="flex items-center justify-between">
+                <span className="font-medium">
+                  Last: {lastWorkout.sessionDate.toLocaleDateString()}
+                </span>
+                <div className="flex items-center gap-2">
+                  <span>Total: {lastWorkout.sets.reduce((sum: number, reps: number) => sum + reps, 0)}</span>
+                  {lastWorkout.intensity && (
+                    <span>Intensity: {lastWorkout.intensity}</span>
+                  )}
+                </div>
+              </div>
             </div>
-          ))}
-          <Button onClick={() => addSet(ex.id)}>
-            <Plus className="mr-2 h-4 w-4"/> Add set
-          </Button>
+          )}
+          
+          {/* Helper message for unnamed exercises */}
+          {!ex.name.trim() || ex.name === 'New exercise' ? (
+            <div className="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded border border-amber-200">
+              💡 Enter an exercise name above to see your previous performance
+            </div>
+          ) : null}
         </div>
+
         <div className="mt-3 text-xs text-neutral-600">
           Rule: individual set turns green when it ≥ target reps. Main card turns green when either the first <strong>min sets</strong> all meet target, or the <strong>sum of reps</strong> across all sets ≥ <em>min sets × target reps</em>.
         </div>
         
-        {/* Exercise History - Only show if there's data */}
-        {(lastWorkout.length > 0 || personalRecord.length > 0) && (
+        {/* Expandable Exercise History */}
+        {hasHistory && (recentWorkouts && recentWorkouts.length > 1 || personalRecord) && (
           <div className="mt-4 pt-4 border-t border-slate-200">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Last Workout */}
-              {lastWorkout.length > 0 && (
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <h4 className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                    <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-                    Last Workout
-                  </h4>
-                  <div className="flex gap-2 flex-wrap">
-                    {lastWorkout.map((reps, i) => (
-                      <div key={i} className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-medium">
-                        {reps}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              
-              {/* Personal Record */}
-              {personalRecord.length > 0 && (
-                <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-lg p-3">
-                  <h4 className="text-sm font-semibold text-amber-700 mb-2 flex items-center gap-2">
-                    <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
-                    Personal Record
-                  </h4>
-                  <div className="flex gap-2 flex-wrap">
-                    {personalRecord.map((reps, i) => (
-                      <div key={i} className="bg-amber-100 text-amber-800 px-2 py-1 rounded text-sm font-medium">
-                        {reps}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+            <div 
+              className="flex items-center justify-between cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors"
+              onClick={() => setHistoryExpanded(!historyExpanded)}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-slate-700">More History</span>
+                {recentWorkouts && recentWorkouts.length > 1 && (
+                  <span className="text-xs text-gray-500">({recentWorkouts.length - 1} previous sessions)</span>
+                )}
+                {historyLoading && <span className="text-xs text-gray-500">Loading...</span>}
+              </div>
+              {historyExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             </div>
+            
+            {historyExpanded && !historyLoading && (
+              <div className="mt-3 space-y-3">
+                {/* Personal Record */}
+                {personalRecord && personalRecord !== lastWorkout && (
+                  <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-lg p-3">
+                    <h4 className="text-sm font-semibold text-amber-700 mb-2 flex items-center gap-2">
+                      <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                      Personal Record ({personalRecord.sessionDate.toLocaleDateString()})
+                    </h4>
+                    <div className="flex gap-2 flex-wrap items-center">
+                      {(personalRecord.sets || []).map((reps: number, i: number) => (
+                        <div key={i} className="bg-amber-100 text-amber-800 px-2 py-1 rounded text-sm font-medium">
+                          {reps}
+                        </div>
+                      ))}
+                      <span className="text-xs text-amber-600 ml-2">
+                        Total: {(personalRecord.sets || []).reduce((sum: number, reps: number) => sum + reps, 0)} reps
+                      </span>
+                      {personalRecord.intensity && (
+                        <span className="text-xs text-amber-600">I:{personalRecord.intensity}</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Previous Sessions History */}
+                {recentWorkouts && recentWorkouts.length > 1 && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                      <span className="w-2 h-2 bg-gray-500 rounded-full"></span>
+                      Previous Sessions
+                    </h4>
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {recentWorkouts.slice(1).map((workout: any, i: number) => (
+                        <div key={`${workout.sessionId}-${i}`} className="flex items-center justify-between text-sm py-1">
+                          <span className="text-gray-600 font-medium">
+                            {workout.sessionDate.toLocaleDateString()}
+                          </span>
+                          <div className="flex gap-1 items-center">
+                            {(workout.sets || []).map((reps: number, j: number) => (
+                              <span key={j} className="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded text-xs font-medium">
+                                {reps}
+                              </span>
+                            ))}
+                            {workout.intensity && (
+                              <span className="text-gray-500 text-xs ml-1">I:{workout.intensity}</span>
+                            )}
+                            <span className="text-gray-500 text-xs ml-2">
+                              ({(workout.sets || []).reduce((sum: number, reps: number) => sum + reps, 0)} total)
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </CardContent>
@@ -2881,6 +3346,8 @@ function HistoryView({ weekly, setWeekly }: { weekly: WeeklyPlan; setWeekly: (w:
   const toasts = useToasts();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set());
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let mounted = true;
@@ -2907,47 +3374,205 @@ function HistoryView({ weekly, setWeekly }: { weekly: WeeklyPlan; setWeekly: (w:
     return () => { mounted = false; };
   }, []);
 
+  // Group sessions by week and day
+  const groupedSessions = useMemo(() => {
+    const groups: Record<string, Record<string, any[]>> = {};
+    
+    items.forEach(session => {
+      const date = new Date(session.completedAt || session.ts || Date.now());
+      const dateISO = date.toISOString().split('T')[0];
+      
+      // Get Monday of the week for this session
+      const monday = getMonday(date);
+      const weekKey = toISO(monday);
+      
+      if (!groups[weekKey]) groups[weekKey] = {};
+      if (!groups[weekKey][dateISO]) groups[weekKey][dateISO] = [];
+      
+      groups[weekKey][dateISO].push(session);
+    });
+    
+    return groups;
+  }, [items]);
+
+  const toggleWeek = (weekKey: string) => {
+    const newExpanded = new Set(expandedWeeks);
+    if (newExpanded.has(weekKey)) {
+      newExpanded.delete(weekKey);
+    } else {
+      newExpanded.add(weekKey);
+    }
+    setExpandedWeeks(newExpanded);
+  };
+
+  const toggleDay = (dayKey: string) => {
+    const newExpanded = new Set(expandedDays);
+    if (newExpanded.has(dayKey)) {
+      newExpanded.delete(dayKey);
+    } else {
+      newExpanded.add(dayKey);
+    }
+    setExpandedDays(newExpanded);
+  };
+
+  // Color scheme for different workout types
+  const getTypeColor = (sessionTypes: string[]) => {
+    if (!sessionTypes || sessionTypes.length === 0) return 'bg-gray-100 border-gray-300';
+    
+    const typeColorMap: Record<string, string> = {
+      'Resistance': 'bg-emerald-100 border-emerald-400 text-emerald-800',
+      'Bike': 'bg-blue-100 border-blue-400 text-blue-800', 
+      'Cardio': 'bg-orange-100 border-orange-400 text-orange-800',
+      'Calves': 'bg-purple-100 border-purple-400 text-purple-800',
+      'Meditation': 'bg-indigo-100 border-indigo-400 text-indigo-800',
+      'Guitar': 'bg-amber-100 border-amber-400 text-amber-800',
+      'Mindfulness': 'bg-teal-100 border-teal-400 text-teal-800',
+    };
+
+    // If multiple types, use a mixed color
+    if (sessionTypes.length > 1) {
+      return 'bg-gradient-to-r from-blue-100 to-purple-100 border-blue-400 text-blue-800';
+    }
+
+    return typeColorMap[sessionTypes[0]] || 'bg-gray-100 border-gray-300 text-gray-700';
+  };
+
   if (loading) return <div>Loading...</div>;
   if (items.length === 0) return <div className="text-sm text-neutral-600">No history yet. Complete sessions will appear here.</div>;
 
+  const sortedWeeks = Object.keys(groupedSessions).sort().reverse();
+
   return (
-    <div className="space-y-3">
-      {items.map((it) => (
-        <Card key={it.id}>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-semibold">{it.sessionName}</div>
-                <div className="text-xs text-neutral-600">{new Date((it.completedAt || it.ts || Date.now()) ).toLocaleString()}</div>
+    <div className="space-y-4">
+      {sortedWeeks.map((weekKey) => {
+        const weekData = groupedSessions[weekKey];
+        const weekStart = new Date(weekKey);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        const isExpanded = expandedWeeks.has(weekKey);
+        
+        const totalSessions = Object.values(weekData).flat().length;
+        const totalDays = Object.keys(weekData).length;
+        
+        return (
+          <Card key={weekKey} className="border-2 transition-all duration-200">
+            <CardHeader 
+              className="cursor-pointer hover:bg-slate-50 transition-colors"
+              onClick={() => toggleWeek(weekKey)}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg">
+                    Week of {weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </CardTitle>
+                  <div className="text-sm text-gray-600">
+                    {totalSessions} sessions across {totalDays} days
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {isExpanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="text-sm text-neutral-600">{(it.exercises || []).length} exercises</div>
-                <Button variant="destructive" onClick={async () => {
-                  if (!confirm('Delete this session?')) return;
-                  try {
-                    const uid = auth.currentUser?.uid; if (!uid) return toasts.push('Sign in to delete', 'info');
-                    await deleteDoc(doc(db, 'users', uid, 'sessions', it.id));
-                    // remove from local weekly state
-                    const days = weekly.days.map(d => ({ ...d, sessionsList: (d.sessionsList || []).filter(s => s.id !== it.id) }));
-                    const newWeekly = normalizeWeekly({ ...weekly, days } as WeeklyPlan);
-                    setWeekly(newWeekly);
-                    // remove from history list
-                    setItems(prev => prev.filter(x => x.id !== it.id));
-                  } catch (e) {
-                    console.error('Delete session failed', e);
-                    toasts.push('Delete failed - see console', 'error');
-                  }
-                }}>Delete</Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-sm">
-              {(it.sessionTypes || []).join(', ')}
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+            </CardHeader>
+            
+            {isExpanded && (
+              <CardContent className="pt-0">
+                <div className="space-y-3">
+                  {Object.keys(weekData).sort().map((dateISO) => {
+                    const daySessions = weekData[dateISO];
+                    const dayKey = `${weekKey}-${dateISO}`;
+                    const isDayExpanded = expandedDays.has(dayKey);
+                    const date = new Date(dateISO);
+                    const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+                    
+                    return (
+                      <div key={dateISO} className="border rounded-lg">
+                        <div 
+                          className="p-3 cursor-pointer hover:bg-slate-50 transition-colors flex items-center justify-between"
+                          onClick={() => toggleDay(dayKey)}
+                        >
+                          <div>
+                            <div className="font-medium">{dayName}, {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
+                            <div className="text-sm text-gray-600">{daySessions.length} session{daySessions.length !== 1 ? 's' : ''}</div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="flex gap-1">
+                              {Array.from(new Set(daySessions.flatMap(s => s.sessionTypes || []))).map(type => (
+                                <span key={type} className={cn('px-2 py-1 rounded-full text-xs font-medium border', getTypeColor([type]))}>
+                                  {type}
+                                </span>
+                              ))}
+                            </div>
+                            {isDayExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          </div>
+                        </div>
+                        
+                        {isDayExpanded && (
+                          <div className="px-3 pb-3 space-y-2">
+                            {daySessions.map((session) => (
+                              <Card key={session.id} className={cn('border', getTypeColor(session.sessionTypes || []))}>
+                                <CardHeader className="pb-2">
+                                  <div className="flex items-center justify-between">
+                                    <div>
+                                      <div className="font-semibold">{session.sessionName}</div>
+                                      <div className="text-xs text-neutral-600">
+                                        {new Date(session.completedAt || session.ts || Date.now()).toLocaleTimeString()}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <div className="text-sm text-neutral-600">{(session.exercises || []).length} exercises</div>
+                                      <Button variant="destructive" size="sm" onClick={async (e) => {
+                                        e.stopPropagation();
+                                        if (!confirm('Delete this session?')) return;
+                                        try {
+                                          const uid = auth.currentUser?.uid; 
+                                          if (!uid) return toasts.push('Sign in to delete', 'info');
+                                          await deleteDoc(doc(db, 'users', uid, 'sessions', session.id));
+                                          // remove from local weekly state
+                                          const days = weekly.days.map(d => ({ ...d, sessionsList: (d.sessionsList || []).filter(s => s.id !== session.id) }));
+                                          const newWeekly = normalizeWeekly({ ...weekly, days } as WeeklyPlan);
+                                          setWeekly(newWeekly);
+                                          // remove from history list
+                                          setItems(prev => prev.filter(x => x.id !== session.id));
+                                        } catch (e) {
+                                          console.error('Delete session failed', e);
+                                          toasts.push('Delete failed - see console', 'error');
+                                        }
+                                      }}>Delete</Button>
+                                    </div>
+                                  </div>
+                                </CardHeader>
+                                <CardContent className="pt-0">
+                                  <div className="text-sm">
+                                    {(session.sessionTypes || []).join(', ')}
+                                  </div>
+                                  {session.exercises && session.exercises.length > 0 && (
+                                    <div className="mt-2 text-xs text-gray-600">
+                                      <div className="font-medium mb-1">Exercises:</div>
+                                      <div className="space-y-1">
+                                        {session.exercises.map((ex: any, i: number) => (
+                                          <div key={i} className="flex justify-between">
+                                            <span>{ex.name}</span>
+                                            <span>{ex.sets?.join(', ') || 'No sets'} (Intensity: {ex.intensity || 0})</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            )}
+          </Card>
+        );
+      })}
     </div>
   );
 }

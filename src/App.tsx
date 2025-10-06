@@ -9,27 +9,29 @@ type Exercise = {
   targetReps: number;
   sets: number[];
   minSets: number;
+  intensity: number;
 };
 
 function App() {
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [newExerciseName, setNewExerciseName] = useState('');
   const [newExerciseReps, setNewExerciseReps] = useState(6);
+  const [newExerciseIntensity, setNewExerciseIntensity] = useState(5);
   const [currentDate] = useState(new Date().toISOString().split('T')[0]);
 
   const addExercise = () => {
     if (!newExerciseName.trim()) return;
-    
     const newExercise: Exercise = {
       id: Date.now().toString(),
       name: newExerciseName.trim(),
       targetReps: newExerciseReps,
       sets: [],
       minSets: 3,
+      intensity: newExerciseIntensity,
     };
-    
     setExercises((prev) => [...prev, newExercise]);
     setNewExerciseName('');
+    setNewExerciseIntensity(5);
   };
 
   const addSet = (exerciseId: string) => {
@@ -100,6 +102,17 @@ function App() {
                   className="w-16 p-2 border rounded"
                 />
               </div>
+              <div className="flex items-center gap-2">
+                <span>Intensity:</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={newExerciseIntensity}
+                  onChange={(e) => setNewExerciseIntensity(parseInt(e.target.value) || 1)}
+                  className="w-16 p-2 border rounded"
+                />
+              </div>
               <Button onClick={addExercise} className="bg-blue-600 hover:bg-blue-700">
                 <Plus className="mr-2 h-4 w-4" /> Add Exercise
               </Button>
@@ -154,6 +167,7 @@ function App() {
                 </div>
                 <div className="text-sm text-gray-600">
                   <p>Target: {exercise.minSets} sets of {exercise.targetReps} reps</p>
+                  <p>Intensity: {exercise.intensity}/10</p>
                   <p>Completed: {exercise.sets.filter(reps => reps > 0).length} sets</p>
                 </div>
               </CardContent>
