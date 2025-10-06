@@ -1153,11 +1153,23 @@ export default function WorkoutTrackerApp() {
                       }
                     }
                     
-                    // Sort by week number descending (most recent first)
-                    prevWeeksData.sort((a, b) => (b.weekNumber || 0) - (a.weekNumber || 0));
+                    // Sort by date descending (most recent first) then assign sequential week numbers
+                    prevWeeksData.sort((a, b) => new Date(b.weekOfISO).getTime() - new Date(a.weekOfISO).getTime());
+                    
+                    // Assign sequential week numbers based on chronological order
+                    // Most recent week gets the highest number
+                    const totalWeeks = prevWeeksData.length + 1; // +1 for current week
+                    prevWeeksData.forEach((weekData, index) => {
+                      weekData.weekNumber = totalWeeks - index - 1; // -1 because current week gets the highest number
+                    });
+                    
+                    // Update current week number too
+                    setWeekly(prev => ({ ...prev, weekNumber: totalWeeks }));
+                    
                     setPreviousWeeks(prevWeeksData);
-                    console.debug('[WT] Final previous weeks loaded', { 
+                    console.debug('[WT] Final previous weeks loaded with sequential numbering', { 
                       count: prevWeeksData.length, 
+                      currentWeekNumber: totalWeeks,
                       weeks: prevWeeksData.map(w => ({ 
                         weekNumber: w.weekNumber, 
                         weekOfISO: w.weekOfISO,
