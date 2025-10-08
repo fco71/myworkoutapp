@@ -1573,7 +1573,7 @@ export default function WorkoutTrackerApp() {
           </TabsContent>
 
           <TabsContent value="history" className="mt-4">
-            <HistoryView weekly={weekly} setWeekly={setWeekly} />
+            <HistoryView weekly={weekly} setWeekly={setWeekly} setSession={setSession} />
           </TabsContent>
 
           <TabsContent value="library" className="mt-4">
@@ -2711,6 +2711,15 @@ function WorkoutView({
     }
     // stop the timer when completed
     setTimerRunning(false);
+    setTimerSec(0);
+    
+    // Clear the current workout session to make space for a new one
+    // The completed workout is now saved in history and remains editable there
+    setTimeout(() => {
+      setSession(defaultSession());
+      toasts.push('🎉 Workout completed! Starting fresh workout session.', 'success');
+    }, 1500); // Small delay to let user see the completion state
+    
     // leave the guard true to prevent re-entry
   };
 
@@ -3530,7 +3539,7 @@ function ExerciseCard({
   );
 }
 
-function HistoryView({ weekly, setWeekly }: { weekly: WeeklyPlan; setWeekly: (w: WeeklyPlan) => void }) {
+function HistoryView({ weekly, setWeekly, setSession }: { weekly: WeeklyPlan; setWeekly: (w: WeeklyPlan) => void; setSession: (s: ResistanceSession) => void }) {
   const toasts = useToasts();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -3709,6 +3718,21 @@ function HistoryView({ weekly, setWeekly }: { weekly: WeeklyPlan; setWeekly: (w:
                                     </div>
                                     <div className="flex items-center gap-2">
                                       <div className="text-sm text-neutral-600">{(session.exercises || []).length} exercises</div>
+                                      <Button variant="outline" size="sm" onClick={(e) => {
+                                        e.stopPropagation();
+                                        // Load this session back into the current workout for editing
+                                        const editableSession: ResistanceSession = {
+                                          ...session,
+                                          completed: false, // Mark as not completed so it can be edited
+                                          dateISO: toISO(new Date()), // Update to today's date
+                                          durationSec: 0 // Reset timer
+                                        };
+                                        setSession(editableSession);
+                                        toasts.push('Session loaded for editing', 'success');
+                                      }}>
+                                        <Edit className="h-3 w-3 mr-1" />
+                                        Edit
+                                      </Button>
                                       <Button variant="destructive" size="sm" onClick={async (e) => {
                                         e.stopPropagation();
                                         if (!confirm('Delete this session?')) return;
