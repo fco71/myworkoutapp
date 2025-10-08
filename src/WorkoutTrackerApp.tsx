@@ -2518,62 +2518,6 @@ function WorkoutView({
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
   const [sessionFavorited, setSessionFavorited] = useState<boolean>(false);
 
-  // Helper function to create test data for exercise history
-  const createTestSession = async () => {
-    try {
-      const uid = auth.currentUser?.uid;
-      if (!uid) {
-        toasts.push('Please log in first', 'error');
-        return;
-      }
-
-      console.log('Creating test session...');
-      const testSession = {
-        sessionName: "Test Workout Session",
-        completedAt: Date.now() - (24 * 60 * 60 * 1000), // Yesterday
-        exercises: [
-          {
-            id: 'test1',
-            name: 'Push ups',
-            sets: [12, 10, 8],
-            minSets: 3,
-            targetReps: 10,
-            intensity: 7
-          },
-          {
-            id: 'test2', 
-            name: 'Squats',
-            sets: [15, 12, 10],
-            minSets: 3,
-            targetReps: 12,
-            intensity: 8
-          },
-          {
-            id: 'test3',
-            name: 'Pull ups',
-            sets: [8, 6, 5],
-            minSets: 3,
-            targetReps: 8,
-            intensity: 9
-          }
-        ],
-        sessionTypes: ["Resistance"],
-        notes: "Test session for exercise history",
-        dateISO: new Date(Date.now() - (24 * 60 * 60 * 1000)).toISOString().split('T')[0]
-      };
-
-      console.log('Test session data:', testSession);
-      const sessionRef = collection(db, 'users', uid, 'sessions');
-      const docRef = await addDoc(sessionRef, testSession);
-      console.log('Test session created with ID:', docRef.id);
-      
-      toasts.push('✅ Test session created! Now try typing "Push ups", "Squats", or "Pull ups" in a new exercise.', 'success');
-    } catch (error) {
-      console.error('Failed to create test session:', error);
-      toasts.push('Failed to create test session', 'error');
-    }
-  };
-  
   // Save routine dialog state
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [routineName, setRoutineName] = useState("");
@@ -2986,9 +2930,6 @@ function WorkoutView({
         </Button>
         <Button variant="outline" onClick={loadRoutines}>
           Load Routine
-        </Button>
-        <Button variant="outline" onClick={createTestSession} className="bg-blue-50 text-blue-700 border-blue-200">
-          🧪 Create Test Data
         </Button>
         <Button 
           variant="secondary" 
