@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
-import { doc, getDoc, setDoc, collection, addDoc, getDocs, deleteDoc, query, where, collectionGroup } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, addDoc, getDocs, deleteDoc, query, where, collectionGroup, orderBy } from "firebase/firestore";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,76 +12,50 @@ import { ToastContainer } from "@/components/ui/toast";
 // Expose Firebase objects globally for console access
 (window as any).appAuth = auth;
 (window as any).appDb = db;
-(window as any).appCollection = collection;
-(window as any).appGetDocs = getDocs;
-(window as any).appDeleteDoc = deleteDoc;
-(window as any).appDoc = doc;
-(window as any).appAddDoc = addDoc;
-(window as any).appSetDoc = setDoc;
-(window as any).appGetDoc = getDoc;
-
-// Expose Firebase objects globally for console access
-(window as any).appAuth = auth;
-(window as any).appDb = db;
-(window as any).appCollection = collection;
-(window as any).appGetDocs = getDocs;
-(window as any).appDeleteDoc = deleteDoc;
-(window as any).appDoc = doc;
 
 // --- Types ---
-type WorkoutType = string; // flexible, user-defined types like 'Bike', 'Calves', 'Resistance', 'Cardio'
-
-type WeeklyDay = {
-  dateISO: string; // yyyy-mm-dd
-  types: Partial<Record<string, boolean>>; // did I do this type today?
-  sessions?: number; // legacy/simple count of sessions completed that day
-  sessionsList?: { id?: string; sessionTypes: WorkoutType[] }[]; // detailed sessions per day
-  comments?: Partial<Record<string, string>>; // comments/notes per workout type
-};
-
-type WeeklyPlan = {
-  weekOfISO: string; // Monday of week
-  weekNumber: number; // Training week number
-  days: WeeklyDay[]; // 7 days
-  benchmarks: Partial<Record<string, number>>; // target days per type
-  customTypes: string[]; // User's custom workout types
-  typeCategories?: Record<string, string>; // optional mapping type -> category (e.g., Bike: Cardio)
-};
-
 type ResistanceExercise = {
   id: string;
   name: string;
-  minSets: number; // usually 3
-  targetReps: number; // e.g., 6
-  intensity?: number; // 1-10 intensity rating
-  sets: number[]; // reps per set, editable
-  notes?: string; // user notes for this exercise
+  minSets: number;
+  targetReps: number;
+  intensity: number;
+  sets: number[];
+  notes: string;
 };
 
 type ResistanceSession = {
+  id?: string;
   dateISO: string;
-  sessionName: string; // e.g., "Legs", "Upper Body"
+  sessionName: string;
   exercises: ResistanceExercise[];
   completed: boolean;
-  sessionTypes: WorkoutType[];
-  durationSec?: number;
-  sourceTemplateId?: string; // optional id of originating library routine/exercise
+  sessionTypes: string[];
+  durationSec: number;
+  completedAt?: number;
+  ts?: number;
+  sourceTemplateId?: string;
 };
 
-// --- Utilities ---
-const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-const toISO = (d: Date) =>
-  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+type WeeklyDay = {
+  dateISO: string;
+  types: Record<string, boolean>;
+  sessions: number;
+  sessionsList: any[];
+  comments: Record<string, string>;
+};
 
-function getMonday(d = new Date()) {
-  const nd = new Date(d);
-  const day = nd.getDay(); // 0 Sun .. 6 Sat
-  const diff = (day === 0 ? -6 : 1) - day; // shift to Monday
-  nd.setDate(nd.getDate() + diff);
-  nd.setHours(0, 0, 0, 0);
-  return nd;
-}
+type WeeklyPlan = {
+  weekOfISO: string;
+  weekNumber: number;
+  days: WeeklyDay[];
+  benchmarks: Record<string, number>;
+  customTypes: string[];
+  typeCategories: Record<string, string>;
+};
 
+// --- Utility Functions ---
+// --- Utility Functions ---
 function weekDates(monday: Date): Date[] {
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday);
@@ -94,7 +68,17 @@ function cn(...classes: (string | false | undefined)[]) {
   return classes.filter(Boolean).join(" ");
 }
 
-// Helper function to compare arrays for equality
+function getMonday(date?: Date): Date {
+  const d = date ? new Date(date) : new Date();
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
+  return new Date(d.setDate(diff));
+}
+
+function toISO(date: Date): string {
+  return date.toISOString().split('T')[0];
+}
+
 function arraysEqual<T>(a: T[], b: T[]): boolean {
   return a.length === b.length && a.every((val, index) => val === b[index]);
 }
@@ -1573,7 +1557,7 @@ export default function WorkoutTrackerApp() {
           </TabsContent>
 
           <TabsContent value="history" className="mt-4">
-            <HistoryView weekly={weekly} setWeekly={setWeekly} setSession={setSession} />
+            <HistoryView weekly={weekly} setWeekly={setWeekly} setSession={setSession} previousWeeks={previousWeeks} />
           </TabsContent>
 
           <TabsContent value="library" className="mt-4">
@@ -1835,7 +1819,8 @@ function WeeklyTracker({
     return c;
   }, [weekly.days, types]);
 
-  const monday = new Date(weekly.weekOfISO);
+  const monday = new Date(weekly.weekOfISO + 'T00:00:00'); // Add time to avoid timezone issues
+  console.log('WeeklyTracker: weekOfISO:', weekly.weekOfISO, 'monday:', monday.toDateString());
   const [newTypeName, setNewTypeName] = useState("");
   const [newTypeCategory, setNewTypeCategory] = useState<string>("None");
 
@@ -2030,6 +2015,13 @@ function WeeklyTracker({
             const currentMon = getMonday();
             const currentWeekISO = toISO(currentMon);
             const currentWeekDates = weekDates(currentMon).map(d => toISO(d));
+            
+            console.debug('[WT] Reset button clicked - Monday calculation:', {
+              today: new Date().toDateString(),
+              monday: currentMon.toDateString(),
+              mondayISO: currentWeekISO,
+              weekDates: currentWeekDates
+            });
             
             const newWeekly: WeeklyPlan = {
               ...weekly,
@@ -2675,7 +2667,8 @@ function WorkoutView({
       if (!uid) {
         console.warn('[WT] completeWorkout: no user id, cannot persist session');
       } else {
-        const payload = { ...session, durationSec: timerSec, completedAt: Date.now() };
+        const payload = { ...session, completed: true, durationSec: timerSec, completedAt: Date.now() };
+        console.log('HistoryView: Saving completed session:', payload);
         const docRef = await addDoc(collection(db, 'users', uid, 'sessions'), payload as any);
         const sessionId = docRef.id;
 
@@ -3539,58 +3532,165 @@ function ExerciseCard({
   );
 }
 
-function HistoryView({ weekly, setWeekly, setSession }: { weekly: WeeklyPlan; setWeekly: (w: WeeklyPlan) => void; setSession: (s: ResistanceSession) => void }) {
+function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly: WeeklyPlan; setWeekly: (w: WeeklyPlan) => void; setSession: (s: ResistanceSession) => void; previousWeeks: WeeklyPlan[] }) {
   const toasts = useToasts();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set());
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
+  const [showAllHistoryDays, setShowAllHistoryDays] = useState<Record<string, boolean>>({});
+
+  // Log component mount
+  console.log('HistoryView: Component mounted, auth state:', !!auth.currentUser, 'weekly days:', weekly.days.length);
 
   useEffect(() => {
     let mounted = true;
-    const load = async () => {
-      setLoading(true);
+    
+    async function loadSessions() {
       try {
+        setLoading(true);
         const uid = auth.currentUser?.uid;
+        console.log('HistoryView: Loading sessions for user:', uid);
+        
         if (!uid) {
-          setItems([]);
-          setLoading(false);
+          console.log('HistoryView: No authenticated user');
+          if (mounted) {
+            setItems([]);
+            setLoading(false);
+          }
           return;
         }
-        const ref = collection(db, 'users', uid, 'sessions');
-        const snaps = await getDocs(ref);
-        const data = snaps.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-        if (mounted) setItems(data.sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0)));
-      } catch (e) {
-        console.error('Load history failed', e);
-      } finally {
-        if (mounted) setLoading(false);
+
+        // Query for sessions that are completed (either have completed: true OR have completedAt field)
+        // Temporarily get ALL sessions to understand the data discrepancy
+        const q = query(
+          collection(db, 'users', uid, 'sessions'),
+          where('completedAt', '!=', null),
+          orderBy('completedAt', 'desc')
+        );
+        
+        console.log('HistoryView: Executing Firestore query...');
+        const snapshot = await getDocs(q);
+        const sessions = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+
+        console.log('HistoryView: Found sessions:', sessions.length);
+
+        // Debug: Check for duplicates and data quality
+        const sessionsByDate: any = {};
+        sessions.forEach((session: any) => {
+          const date = session.dateISO || session.date;
+          if (!sessionsByDate[date]) sessionsByDate[date] = [];
+          sessionsByDate[date].push({
+            id: session.id,
+            sessionTypes: session.sessionTypes,
+            completedAt: session.completedAt,
+            exercises: session.exercises?.length || 0,
+            timestamp: session.completedAt?.toDate?.() || session.completedAt
+          });
+        });
+        console.log('HistoryView: Sessions grouped by date:', Object.keys(sessionsByDate));
+
+        // Debug: Compare Firestore data with weekly tracker data
+        // Weekly data debug info
+        console.log('HistoryView: Weekly.days length:', weekly.days?.length);
+        
+        // Log session dates vs weekly days with sessions for comparison
+        if (sessions.length > 0) {
+          const sessionDates = sessions.map((s: any) => {
+            const date = s.dateISO || (s.completedAt?.toDate ? s.completedAt.toDate().toISOString().split('T')[0] : 'unknown');
+            return date;
+          }).filter(Boolean);
+        console.log('HistoryView: Firestore session dates:', sessionDates.length, 'sessions');
+        }
+        
+        const weeklyDatesWithSessions = weekly.days
+          .filter(day => day.sessionsList && day.sessionsList.length > 0)
+          .map(day => day.dateISO);
+        console.log('HistoryView: Weekly tracker dates with sessions:', weeklyDatesWithSessions);
+
+        // Use all sessions for now
+        console.log('HistoryView: Total Firestore sessions found:', sessions.length);
+
+        // PRIORITY FIX: Show actual recent sessions from weekly tracker data, not old test data
+        let displaySessions: any[] = [];
+        
+        // Process ALL weekly data (current week + previous weeks)
+        const allWeeklyData = [weekly, ...previousWeeks];
+        
+        allWeeklyData.forEach((weekData) => {
+          weekData.days?.forEach((day: any) => {
+            // Get all active workout types for this day
+            const activeTypes = day.types ? Object.keys(day.types).filter(t => day.types[t]) : [];
+            
+            if (activeTypes.length > 0) {
+              // Create a single session representing all workout types for the day
+              const sessionData = {
+                id: `daily:${day.dateISO}:${Date.now()}:${Math.random()}`, // Add more uniqueness
+                dateISO: day.dateISO,
+                sessionName: activeTypes.join(' + '),
+                sessionTypes: activeTypes,
+                completed: true,
+                exercises: [],
+                durationSec: 0,
+                completedAt: new Date(day.dateISO + 'T12:00:00'),
+                source: 'weekly_tracker_types'
+              };
+              displaySessions.push(sessionData);
+            }
+          });
+        });
+
+        // Add Firestore sessions, but only if they don't conflict with weekly tracker data
+        const weeklyTrackerDates = displaySessions.map(s => s.dateISO);
+        
+        sessions.forEach((fs: any) => {
+          const fsDate = fs.dateISO || (fs.completedAt?.toDate ? fs.completedAt.toDate().toISOString().split('T')[0] : null);
+          
+          // Only add Firestore sessions from dates NOT covered by weekly tracker data
+          if (fsDate && !weeklyTrackerDates.includes(fsDate)) {
+            displaySessions.push({ ...fs, source: 'firestore' });
+          }
+        });
+        
+        // Debug: Show what sessions are for each day in the current week
+
+        // Debug: Check for potential duplicates
+        const duplicateCheckByDate: any = {};
+        displaySessions.forEach(session => {
+          const date = session.dateISO;
+          if (!duplicateCheckByDate[date]) duplicateCheckByDate[date] = [];
+          duplicateCheckByDate[date].push({
+            id: session.id,
+            source: session.source,
+            sessionName: session.sessionName
+          });
+        });
+        // Debug: Sessions grouped by date for duplicate check
+
+        if (mounted) {
+          // Force a complete re-render by clearing first, then setting
+          setItems([]);
+          setTimeout(() => {
+            if (mounted) {
+              setItems(displaySessions);
+              setLoading(false);
+            }
+          }, 10);
+        }
+      } catch (error) {
+        console.error('Failed to load sessions:', error);
+        if (mounted) {
+          setLoading(false);
+        }
       }
-    };
-    load();
+    }
+
+    loadSessions();
     return () => { mounted = false; };
   }, []);
-
-  // Group sessions by week and day
-  const groupedSessions = useMemo(() => {
-    const groups: Record<string, Record<string, any[]>> = {};
-    
-    items.forEach(session => {
-      const date = new Date(session.completedAt || session.ts || Date.now());
-      const dateISO = date.toISOString().split('T')[0];
-      
-      // Get Monday of the week for this session
-      const monday = getMonday(date);
-      const weekKey = toISO(monday);
-      
-      if (!groups[weekKey]) groups[weekKey] = {};
-      if (!groups[weekKey][dateISO]) groups[weekKey][dateISO] = [];
-      
-      groups[weekKey][dateISO].push(session);
-    });
-    
-    return groups;
-  }, [items]);
 
   const toggleWeek = (weekKey: string) => {
     const newExpanded = new Set(expandedWeeks);
@@ -3612,10 +3712,25 @@ function HistoryView({ weekly, setWeekly, setSession }: { weekly: WeeklyPlan; se
     setExpandedDays(newExpanded);
   };
 
-  // Color scheme for different workout types
-  const getTypeColor = (sessionTypes: string[]) => {
-    if (!sessionTypes || sessionTypes.length === 0) return 'bg-gray-100 border-gray-300';
+  // Group sessions by week, then by day
+  const groupedSessions = useMemo(() => {
+    const groups: Record<string, Record<string, any[]>> = {};
     
+    items.forEach(session => {
+      const date = new Date(session.dateISO || session.completedAt || session.ts);
+      const monday = getMonday(date);
+      const weekKey = toISO(monday);
+      const dayKey = toISO(date);
+      
+      if (!groups[weekKey]) groups[weekKey] = {};
+      if (!groups[weekKey][dayKey]) groups[weekKey][dayKey] = [];
+      groups[weekKey][dayKey].push(session);
+    });
+    
+    return groups;
+  }, [items]);
+
+  const getTypeColor = (sessionTypes: string[]) => {
     const typeColorMap: Record<string, string> = {
       'Resistance': 'bg-emerald-100 border-emerald-400 text-emerald-800',
       'Bike': 'bg-blue-100 border-blue-400 text-blue-800', 
@@ -3634,14 +3749,147 @@ function HistoryView({ weekly, setWeekly, setSession }: { weekly: WeeklyPlan; se
     return typeColorMap[sessionTypes[0]] || 'bg-gray-100 border-gray-300 text-gray-700';
   };
 
-  if (loading) return <div>Loading...</div>;
-  if (items.length === 0) return <div className="text-sm text-neutral-600">No history yet. Complete sessions will appear here.</div>;
+  if (loading) return (
+    <div className="p-4 text-center">
+      <div>Loading history...</div>
+      <div className="text-xs text-gray-500 mt-2">
+        Querying Firestore for user: {auth.currentUser?.email}
+      </div>
+    </div>
+  );
+  
+  if (items.length === 0) return (
+    <div className="text-sm text-neutral-600 space-y-2">
+      <div>No history yet. Complete sessions will appear here.</div>
+      <div className="text-xs text-gray-400 bg-gray-50 p-2 rounded">
+        <div><strong>Debug info:</strong></div>
+        <div>User authenticated: {auth.currentUser ? 'Yes' : 'No'}</div>
+        <div>User ID: {auth.currentUser?.uid || 'None'}</div>
+        <div>User email: {auth.currentUser?.email || 'None'}</div>
+        <div>Items loaded: {items.length}</div>
+        <div>Weekly days with sessions: {weekly.days.filter(d => d.sessionsList && d.sessionsList.length > 0).length}</div>
+        <div>Firebase project: fcoworkout</div>
+        <div>Environment: {window.location.hostname}</div>
+      </div>
+      <div className="flex gap-2">
+        <button 
+          onClick={() => {
+            window.location.reload();
+          }}
+          className="px-3 py-1 bg-green-500 text-white rounded text-xs"
+        >
+          Reload History
+        </button>
+        <button 
+          onClick={() => {
+            console.log('Current auth state:', auth.currentUser);
+            console.log('Weekly data:', weekly);
+          }}
+          className="px-3 py-1 bg-gray-500 text-white rounded text-xs"
+        >
+          Log Debug Info
+        </button>
+        <button 
+          onClick={async () => {
+            try {
+              const uid = auth.currentUser?.uid;
+              if (!uid) {
+                alert('Not authenticated');
+                return;
+              }
+              console.log('Manual query for user:', uid);
+              const q = query(
+                collection(db, 'users', uid, 'sessions'),
+                where('completedAt', '!=', null)
+              );
+              const snapshot = await getDocs(q);
+              const sessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+              console.log('Manual query result:', sessions);
+              alert(`Found ${sessions.length} sessions. Check console for details.`);
+            } catch (e) {
+              console.error('Manual query error:', e);
+              alert('Error: ' + e);
+            }
+          }}
+          className="px-3 py-1 bg-blue-500 text-white rounded text-xs"
+        >
+          Test Query
+        </button>
+      </div>
+    </div>
+  );
 
   const sortedWeeks = Object.keys(groupedSessions).sort().reverse();
 
+  // Always show debug info at the top
+  const historyDebugInfo = {
+    authenticated: !!auth.currentUser,
+    uid: auth.currentUser?.uid,
+    email: auth.currentUser?.email,
+    itemsCount: items.length,
+    loading: loading,
+    weeklyDaysWithSessions: weekly.days.filter(d => d.sessionsList && d.sessionsList.length > 0).length,
+    sortedWeeksCount: sortedWeeks.length
+  };
+
   return (
     <div className="space-y-4">
-      {sortedWeeks.map((weekKey) => {
+      {/* Debug panel - always visible */}
+      <div className="bg-yellow-50 border border-yellow-200 p-3 rounded text-sm">
+        <div className="font-bold mb-2">Debug Info:</div>
+        <div>Status: {loading ? 'Loading...' : 'Loaded'}</div>
+        <div>User: {historyDebugInfo.email || 'Not signed in'}</div>
+        <div>Sessions loaded: {historyDebugInfo.itemsCount}</div>
+        <div>Grouped weeks: {historyDebugInfo.sortedWeeksCount}</div>
+        <div>Weekly days with sessions: {historyDebugInfo.weeklyDaysWithSessions}</div>
+        <button 
+          onClick={async () => {
+            try {
+              const uid = auth.currentUser?.uid;
+              if (!uid) {
+                alert('Not authenticated');
+                return;
+              }
+              console.log('Manual query for user:', uid);
+              const q = query(
+                collection(db, 'users', uid, 'sessions'),
+                where('completedAt', '!=', null),
+                orderBy('completedAt', 'desc')
+              );
+              const snapshot = await getDocs(q);
+              const sessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+              console.log('Manual query result:', sessions);
+              alert(`Found ${sessions.length} sessions. Check console for details.`);
+            } catch (e) {
+              console.error('Manual query error:', e);
+              alert('Error: ' + e);
+            }
+          }}
+          className="mt-2 px-3 py-1 bg-blue-500 text-white rounded text-xs"
+        >
+          Test Firestore Query
+        </button>
+      </div>
+
+      {loading && (
+        <div className="p-4 text-center">
+          <div>Loading history...</div>
+          <div className="text-xs text-gray-500 mt-2">
+            Querying Firestore for user: {auth.currentUser?.email}
+          </div>
+        </div>
+      )}
+
+      {!loading && items.length === 0 && (
+        <div className="text-sm text-neutral-600 space-y-2">
+          <div>No history yet. Complete sessions will appear here.</div>
+        </div>
+      )}
+
+      {!loading && sortedWeeks.length > 0 && (
+        <div>
+          <h3 className="text-lg font-semibold mb-4">Session History ({items.length} sessions)</h3>
+          {sortedWeeks.map((weekKey) => {
         const weekData = groupedSessions[weekKey];
         const weekStart = new Date(weekKey);
         const weekEnd = new Date(weekStart);
@@ -3706,7 +3954,7 @@ function HistoryView({ weekly, setWeekly, setSession }: { weekly: WeeklyPlan; se
                         
                         {isDayExpanded && (
                           <div className="px-3 pb-3 space-y-2">
-                            {daySessions.map((session) => (
+                            {(showAllHistoryDays[dayKey] ? daySessions : daySessions.slice(0, 3)).map((session) => (
                               <Card key={session.id} className={cn('border', getTypeColor(session.sessionTypes || []))}>
                                 <CardHeader className="pb-2">
                                   <div className="flex items-center justify-between">
@@ -3717,7 +3965,9 @@ function HistoryView({ weekly, setWeekly, setSession }: { weekly: WeeklyPlan; se
                                       </div>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                      <div className="text-sm text-neutral-600">{(session.exercises || []).length} exercises</div>
+                                      {session.exercises && session.exercises.length > 0 && (
+                                        <div className="text-sm text-neutral-600">{session.exercises.length} exercises</div>
+                                      )}
                                       <Button variant="outline" size="sm" onClick={(e) => {
                                         e.stopPropagation();
                                         // Load this session back into the current workout for editing
@@ -3774,6 +4024,11 @@ function HistoryView({ weekly, setWeekly, setSession }: { weekly: WeeklyPlan; se
                                 </CardContent>
                               </Card>
                             ))}
+                            {daySessions.length > 3 && (
+                              <Button variant="ghost" size="sm" onClick={() => setShowAllHistoryDays(prev => ({ ...prev, [dayKey]: !prev[dayKey] }))}>
+                                {showAllHistoryDays[dayKey] ? 'Show Less' : 'More History'}
+                              </Button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -3785,6 +4040,8 @@ function HistoryView({ weekly, setWeekly, setSession }: { weekly: WeeklyPlan; se
           </Card>
         );
       })}
+        </div>
+      )}
     </div>
   );
 }
@@ -4540,7 +4797,7 @@ function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onL
                         size="sm"
                         onClick={() => {
                           // For individual exercises, add them to current session
-                          const exercise = { id: crypto.randomUUID(), name: it.name, minSets: it.minSets || 3, targetReps: it.targetReps || 8, sets: Array(it.minSets || 3).fill(0), notes: it.notes || "" };
+                          const exercise = { id: crypto.randomUUID(), name: it.name, minSets: it.minSets || 3, targetReps: it.targetReps || 8, intensity: 0, sets: Array(it.minSets || 3).fill(0), notes: it.notes || "" };
                           onLoadRoutine({ dateISO: toISO(new Date()), sessionName: 'Current Session', exercises: [exercise], completed: false, sessionTypes: [], durationSec: 0 }, 'append');
                         }}
                         className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-sm"
