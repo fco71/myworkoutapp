@@ -653,6 +653,8 @@ function WeeklyBenchmarkStack({
 }) {
   const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set());
   
+  console.log('[WeeklyBenchmarkStack] Rendering with previousWeeks:', previousWeeks.length, previousWeeks);
+  
   const toggleWeek = (weekNumber: number) => {
     const newExpanded = new Set(expandedWeeks);
     if (newExpanded.has(weekNumber)) {
@@ -3618,12 +3620,19 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
         let displaySessions: any[] = [];
         
         // Process ALL weekly data (current week + previous weeks)
+        console.log('[HistoryView] Processing weekly data - Current week:', weekly.weekOfISO, 'Previous weeks:', previousWeeks.length);
         const allWeeklyData = [weekly, ...previousWeeks];
+        console.log('[HistoryView] Total weeks to process:', allWeeklyData.length);
         
-        allWeeklyData.forEach((weekData) => {
+        allWeeklyData.forEach((weekData, weekIndex) => {
+          console.log(`[HistoryView] Week ${weekIndex} (${weekData.weekOfISO}): ${weekData.days?.length || 0} days`);
           weekData.days?.forEach((day: any) => {
             // Get all active workout types for this day
             const activeTypes = day.types ? Object.keys(day.types).filter(t => day.types[t]) : [];
+            
+            if (activeTypes.length > 0) {
+              console.log(`[HistoryView] Day ${day.dateISO} has active types:`, activeTypes);
+            }
             
             if (activeTypes.length > 0) {
               // Create a single session representing all workout types for the day
@@ -3638,13 +3647,18 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
                 completedAt: new Date(day.dateISO + 'T12:00:00'),
                 source: 'weekly_tracker_types'
               };
+              console.log(`[HistoryView] Created session for ${day.dateISO}:`, sessionData.sessionName);
               displaySessions.push(sessionData);
+              console.log(`[HistoryView] displaySessions now has ${displaySessions.length} sessions`);
             }
           });
         });
 
+        console.log(`[HistoryView] Total sessions from weekly tracker: ${displaySessions.length}`);
+        
         // Add Firestore sessions, but only if they don't conflict with weekly tracker data
         const weeklyTrackerDates = displaySessions.map(s => s.dateISO);
+        console.log(`[HistoryView] Weekly tracker covers dates:`, weeklyTrackerDates);
         
         sessions.forEach((fs: any) => {
           const fsDate = fs.dateISO || (fs.completedAt?.toDate ? fs.completedAt.toDate().toISOString().split('T')[0] : null);
@@ -3670,15 +3684,16 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
         });
         // Debug: Sessions grouped by date for duplicate check
 
+        console.log(`[HistoryView] About to set items. displaySessions has ${displaySessions.length} sessions`);
+        console.log(`[HistoryView] Sessions breakdown:`, {
+          weeklyTracker: displaySessions.filter(s => s.source === 'weekly_tracker_types').length,
+          firestore: displaySessions.filter(s => s.source === 'firestore').length
+        });
+        
         if (mounted) {
-          // Force a complete re-render by clearing first, then setting
-          setItems([]);
-          setTimeout(() => {
-            if (mounted) {
-              setItems(displaySessions);
-              setLoading(false);
-            }
-          }, 10);
+          // Set items directly without clearing first to avoid race conditions
+          setItems(displaySessions);
+          setLoading(false);
         }
       } catch (error) {
         console.error('Failed to load sessions:', error);
@@ -3821,56 +3836,8 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
 
   const sortedWeeks = Object.keys(groupedSessions).sort().reverse();
 
-  // Always show debug info at the top
-  const historyDebugInfo = {
-    authenticated: !!auth.currentUser,
-    uid: auth.currentUser?.uid,
-    email: auth.currentUser?.email,
-    itemsCount: items.length,
-    loading: loading,
-    weeklyDaysWithSessions: weekly.days.filter(d => d.sessionsList && d.sessionsList.length > 0).length,
-    sortedWeeksCount: sortedWeeks.length
-  };
-
   return (
     <div className="space-y-4">
-      {/* Debug panel - always visible */}
-      <div className="bg-yellow-50 border border-yellow-200 p-3 rounded text-sm">
-        <div className="font-bold mb-2">Debug Info:</div>
-        <div>Status: {loading ? 'Loading...' : 'Loaded'}</div>
-        <div>User: {historyDebugInfo.email || 'Not signed in'}</div>
-        <div>Sessions loaded: {historyDebugInfo.itemsCount}</div>
-        <div>Grouped weeks: {historyDebugInfo.sortedWeeksCount}</div>
-        <div>Weekly days with sessions: {historyDebugInfo.weeklyDaysWithSessions}</div>
-        <button 
-          onClick={async () => {
-            try {
-              const uid = auth.currentUser?.uid;
-              if (!uid) {
-                alert('Not authenticated');
-                return;
-              }
-              console.log('Manual query for user:', uid);
-              const q = query(
-                collection(db, 'users', uid, 'sessions'),
-                where('completedAt', '!=', null),
-                orderBy('completedAt', 'desc')
-              );
-              const snapshot = await getDocs(q);
-              const sessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-              console.log('Manual query result:', sessions);
-              alert(`Found ${sessions.length} sessions. Check console for details.`);
-            } catch (e) {
-              console.error('Manual query error:', e);
-              alert('Error: ' + e);
-            }
-          }}
-          className="mt-2 px-3 py-1 bg-blue-500 text-white rounded text-xs"
-        >
-          Test Firestore Query
-        </button>
-      </div>
-
       {loading && (
         <div className="p-4 text-center">
           <div>Loading history...</div>
