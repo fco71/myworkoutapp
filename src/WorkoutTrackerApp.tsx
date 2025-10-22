@@ -3554,73 +3554,12 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
         const uid = auth.currentUser?.uid;
         console.log('HistoryView: Loading sessions for user:', uid);
         
-        if (!uid) {
-          console.log('HistoryView: No authenticated user');
-          if (mounted) {
-            setItems([]);
-            setLoading(false);
-          }
-          return;
-        }
-
-        // Query for sessions that are completed (either have completed: true OR have completedAt field)
-        // Temporarily get ALL sessions to understand the data discrepancy
-        const q = query(
-          collection(db, 'users', uid, 'sessions'),
-          where('completedAt', '!=', null),
-          orderBy('completedAt', 'desc')
-        );
-        
-        console.log('HistoryView: Executing Firestore query...');
-        const snapshot = await getDocs(q);
-        const sessions = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-
-        console.log('HistoryView: Found sessions:', sessions.length);
-
-        // Debug: Check for duplicates and data quality
-        const sessionsByDate: any = {};
-        sessions.forEach((session: any) => {
-          const date = session.dateISO || session.date;
-          if (!sessionsByDate[date]) sessionsByDate[date] = [];
-          sessionsByDate[date].push({
-            id: session.id,
-            sessionTypes: session.sessionTypes,
-            completedAt: session.completedAt,
-            exercises: session.exercises?.length || 0,
-            timestamp: session.completedAt?.toDate?.() || session.completedAt
-          });
-        });
-        console.log('HistoryView: Sessions grouped by date:', Object.keys(sessionsByDate));
-
-        // Debug: Compare Firestore data with weekly tracker data
-        // Weekly data debug info
-        console.log('HistoryView: Weekly.days length:', weekly.days?.length);
-        
-        // Log session dates vs weekly days with sessions for comparison
-        if (sessions.length > 0) {
-          const sessionDates = sessions.map((s: any) => {
-            const date = s.dateISO || (s.completedAt?.toDate ? s.completedAt.toDate().toISOString().split('T')[0] : 'unknown');
-            return date;
-          }).filter(Boolean);
-        console.log('HistoryView: Firestore session dates:', sessionDates.length, 'sessions');
-        }
-        
-        const weeklyDatesWithSessions = weekly.days
-          .filter(day => day.sessionsList && day.sessionsList.length > 0)
-          .map(day => day.dateISO);
-        console.log('HistoryView: Weekly tracker dates with sessions:', weeklyDatesWithSessions);
-
-        // Use all sessions for now
-        console.log('HistoryView: Total Firestore sessions found:', sessions.length);
-
-        // PRIORITY FIX: Show actual recent sessions from weekly tracker data, not old test data
+        // ALWAYS process weekly tracker data first (works even without authentication)
         let displaySessions: any[] = [];
         
         // Process ALL weekly data (current week + previous weeks)
         console.log('[HistoryView] Processing weekly data - Current week:', weekly.weekOfISO, 'Previous weeks:', previousWeeks.length);
+        console.log('[HistoryView] Weekly days:', weekly.days?.length, 'days');
         const allWeeklyData = [weekly, ...previousWeeks];
         console.log('[HistoryView] Total weeks to process:', allWeeklyData.length);
         
@@ -3637,7 +3576,7 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
             if (activeTypes.length > 0) {
               // Create a single session representing all workout types for the day
               const sessionData = {
-                id: `daily:${day.dateISO}:${Date.now()}:${Math.random()}`, // Add more uniqueness
+                id: `daily:${day.dateISO}:${Date.now()}:${Math.random()}`,
                 dateISO: day.dateISO,
                 sessionName: activeTypes.join(' + '),
                 sessionTypes: activeTypes,
@@ -3649,40 +3588,48 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
               };
               console.log(`[HistoryView] Created session for ${day.dateISO}:`, sessionData.sessionName);
               displaySessions.push(sessionData);
-              console.log(`[HistoryView] displaySessions now has ${displaySessions.length} sessions`);
             }
           });
         });
 
         console.log(`[HistoryView] Total sessions from weekly tracker: ${displaySessions.length}`);
         
-        // Add Firestore sessions, but only if they don't conflict with weekly tracker data
-        const weeklyTrackerDates = displaySessions.map(s => s.dateISO);
-        console.log(`[HistoryView] Weekly tracker covers dates:`, weeklyTrackerDates);
-        
-        sessions.forEach((fs: any) => {
-          const fsDate = fs.dateISO || (fs.completedAt?.toDate ? fs.completedAt.toDate().toISOString().split('T')[0] : null);
-          
-          // Only add Firestore sessions from dates NOT covered by weekly tracker data
-          if (fsDate && !weeklyTrackerDates.includes(fsDate)) {
-            displaySessions.push({ ...fs, source: 'firestore' });
-          }
-        });
-        
-        // Debug: Show what sessions are for each day in the current week
+        // If authenticated, also load Firestore sessions
+        if (uid) {
+          try {
+            const q = query(
+              collection(db, 'users', uid, 'sessions'),
+              where('completedAt', '!=', null),
+              orderBy('completedAt', 'desc')
+            );
+            
+            console.log('HistoryView: Executing Firestore query...');
+            const snapshot = await getDocs(q);
+            const sessions = snapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            }));
 
-        // Debug: Check for potential duplicates
-        const duplicateCheckByDate: any = {};
-        displaySessions.forEach(session => {
-          const date = session.dateISO;
-          if (!duplicateCheckByDate[date]) duplicateCheckByDate[date] = [];
-          duplicateCheckByDate[date].push({
-            id: session.id,
-            source: session.source,
-            sessionName: session.sessionName
-          });
-        });
-        // Debug: Sessions grouped by date for duplicate check
+            console.log('HistoryView: Found Firestore sessions:', sessions.length);
+            
+            // Add Firestore sessions, but only if they don't conflict with weekly tracker data
+            const weeklyTrackerDates = displaySessions.map(s => s.dateISO);
+            console.log(`[HistoryView] Weekly tracker covers dates:`, weeklyTrackerDates);
+            
+            sessions.forEach((fs: any) => {
+              const fsDate = fs.dateISO || (fs.completedAt?.toDate ? fs.completedAt.toDate().toISOString().split('T')[0] : null);
+              
+              // Only add Firestore sessions from dates NOT covered by weekly tracker data
+              if (fsDate && !weeklyTrackerDates.includes(fsDate)) {
+                displaySessions.push({ ...fs, source: 'firestore' });
+              }
+            });
+          } catch (error) {
+            console.warn('HistoryView: Failed to load Firestore sessions:', error);
+          }
+        } else {
+          console.log('HistoryView: No authenticated user, skipping Firestore query');
+        }
 
         console.log(`[HistoryView] About to set items. displaySessions has ${displaySessions.length} sessions`);
         console.log(`[HistoryView] Sessions breakdown:`, {
@@ -3691,7 +3638,6 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
         });
         
         if (mounted) {
-          // Set items directly without clearing first to avoid race conditions
           setItems(displaySessions);
           setLoading(false);
         }
@@ -3705,7 +3651,7 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
 
     loadSessions();
     return () => { mounted = false; };
-  }, []);
+  }, [weekly, previousWeeks]);
 
   const toggleWeek = (weekKey: string) => {
     const newExpanded = new Set(expandedWeeks);
@@ -3732,10 +3678,20 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
     const groups: Record<string, Record<string, any[]>> = {};
     
     items.forEach(session => {
-      const date = new Date(session.dateISO || session.completedAt || session.ts);
+      // Use dateISO directly if available to avoid timezone conversion issues
+      let dayKey: string;
+      if (session.dateISO) {
+        dayKey = session.dateISO;
+      } else {
+        const date = new Date(session.completedAt || session.ts);
+        dayKey = toISO(date);
+      }
+      
+      // Calculate week key from the day's ISO date (avoid Date object conversion)
+      const [year, month, day] = dayKey.split('-').map(Number);
+      const date = new Date(year, month - 1, day); // Local date from ISO parts
       const monday = getMonday(date);
       const weekKey = toISO(monday);
-      const dayKey = toISO(date);
       
       if (!groups[weekKey]) groups[weekKey] = {};
       if (!groups[weekKey][dayKey]) groups[weekKey][dayKey] = [];
@@ -3858,7 +3814,9 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
           <h3 className="text-lg font-semibold mb-4">Session History ({items.length} sessions)</h3>
           {sortedWeeks.map((weekKey) => {
         const weekData = groupedSessions[weekKey];
-        const weekStart = new Date(weekKey);
+        // Parse ISO date properly to avoid timezone issues
+        const [year, month, day] = weekKey.split('-').map(Number);
+        const weekStart = new Date(year, month - 1, day);
         const weekEnd = new Date(weekStart);
         weekEnd.setDate(weekStart.getDate() + 6);
         const isExpanded = expandedWeeks.has(weekKey);
@@ -3894,7 +3852,9 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
                     const daySessions = weekData[dateISO];
                     const dayKey = `${weekKey}-${dateISO}`;
                     const isDayExpanded = expandedDays.has(dayKey);
-                    const date = new Date(dateISO);
+                    // Parse ISO date properly to avoid timezone issues
+                    const [year, month, day] = dateISO.split('-').map(Number);
+                    const date = new Date(year, month - 1, day);
                     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
                     
                     return (
@@ -3927,9 +3887,11 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
                                   <div className="flex items-center justify-between">
                                     <div>
                                       <div className="font-semibold">{session.sessionName}</div>
-                                      <div className="text-xs text-neutral-600">
-                                        {new Date(session.completedAt || session.ts || Date.now()).toLocaleTimeString()}
-                                      </div>
+                                      {session.source !== 'weekly_tracker_types' && session.completedAt && (
+                                        <div className="text-xs text-neutral-600">
+                                          {new Date(session.completedAt).toLocaleTimeString()}
+                                        </div>
+                                      )}
                                     </div>
                                     <div className="flex items-center gap-2">
                                       {session.exercises && session.exercises.length > 0 && (
