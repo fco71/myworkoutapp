@@ -1170,8 +1170,36 @@ export default function WorkoutTrackerApp() {
               }
               if (data?.session) setSession(data.session);
             } else {
-              console.debug('[WT] No current week data found, checking legacy tracker doc');
-              // fallback to legacy tracker doc
+              console.debug('[WT] No current week data found, will auto-copy from previous week');
+              
+              // Try to load previous week's benchmarks automatically
+              const prevMonday = new Date(currentMonday);
+              prevMonday.setDate(currentMonday.getDate() - 7);
+              const prevISO = toISO(prevMonday);
+              
+              let benchmarksFromPrevWeek = {};
+              let customTypesFromPrevWeek: string[] = [];
+              
+              try {
+                const prevWeekRef = doc(db, 'users', u.uid, 'state', prevISO);
+                const prevSnap = await getDoc(prevWeekRef);
+                if (prevSnap.exists()) {
+                  const prevData = prevSnap.data() as PersistedState;
+                  if (prevData?.weekly) {
+                    benchmarksFromPrevWeek = prevData.weekly.benchmarks || {};
+                    customTypesFromPrevWeek = prevData.weekly.customTypes || [];
+                    console.debug('[WT] Auto-copied benchmarks from previous week:', { 
+                      prevWeek: prevISO, 
+                      benchmarks: benchmarksFromPrevWeek,
+                      customTypes: customTypesFromPrevWeek
+                    });
+                  }
+                }
+              } catch (e) {
+                console.warn('[WT] Failed to auto-copy from previous week:', e);
+              }
+              
+              // Check legacy tracker doc as fallback
               const ref = doc(db, "users", u.uid, "state", "tracker");
               const snap = await getDoc(ref);
               if (snap.exists()) {
@@ -1180,8 +1208,9 @@ export default function WorkoutTrackerApp() {
                 if (data?.weekly) {
                   // Apply same week correction logic as current week loading
                   const normalized = normalizeWeekly({ 
-                    ...data.weekly, 
-                    customTypes: ensureUniqueTypes(data.weekly.customTypes || []),
+                    ...data.weekly,
+                    benchmarks: Object.keys(benchmarksFromPrevWeek).length > 0 ? benchmarksFromPrevWeek : data.weekly.benchmarks,
+                    customTypes: customTypesFromPrevWeek.length > 0 ? ensureUniqueTypes(customTypesFromPrevWeek) : ensureUniqueTypes(data.weekly.customTypes || []),
                     weekOfISO: currentWeekISO // Force current week ISO
                   } as WeeklyPlan);
                   
@@ -1210,10 +1239,34 @@ export default function WorkoutTrackerApp() {
                 }
                 if (data?.session) setSession(data.session);
               } else {
-                console.debug('[WT] No legacy tracker data found, using defaultWeekly()');
+                console.debug('[WT] No legacy tracker data found, using defaultWeekly() with auto-copied benchmarks');
                 const defaultWk = defaultWeekly();
+                // Apply auto-copied benchmarks and types if available
+                if (Object.keys(benchmarksFromPrevWeek).length > 0 || customTypesFromPrevWeek.length > 0) {
+                  defaultWk.benchmarks = benchmarksFromPrevWeek;
+                  defaultWk.customTypes = customTypesFromPrevWeek;
+                  console.debug('[WT] Applied auto-copied settings to defaultWeekly:', { 
+                    benchmarks: benchmarksFromPrevWeek,
+                    customTypes: customTypesFromPrevWeek
+                  });
+                }
                 console.debug('[WT] Generated defaultWeekly:', { weekOfISO: defaultWk.weekOfISO, monday: getMonday().toDateString() });
                 setWeekly(defaultWk);
+                
+                // Save the new week with auto-copied benchmarks to Firestore
+                if (Object.keys(benchmarksFromPrevWeek).length > 0 || customTypesFromPrevWeek.length > 0) {
+                  try {
+                    await setDoc(doc(db, 'users', u.uid, 'state', currentWeekISO), { 
+                      weekly: { 
+                        benchmarks: benchmarksFromPrevWeek, 
+                        customTypes: customTypesFromPrevWeek 
+                      } 
+                    }, { merge: true });
+                    console.debug('[WT] Auto-saved benchmarks for new week');
+                  } catch (e) {
+                    console.warn('[WT] Failed to auto-save benchmarks:', e);
+                  }
+                }
               }
             }
           } catch (e) {
@@ -2046,27 +2099,6 @@ function WeeklyTracker({
           }}>
             Reset to Current Week
           </Button>
-          <Button variant="outline" onClick={async () => {
-            // copy previous week from Firestore if signed in
-            const uid = auth.currentUser?.uid;
-            if (!uid) { push?.('Sign in to copy previous week', 'info'); return; }
-            const prevMonday = new Date(monday);
-            prevMonday.setDate(monday.getDate() - 7);
-            const prevISO = toISO(prevMonday);
-            try {
-              const ref = doc(db, 'users', uid, 'state', prevISO);
-              const snap = await getDoc(ref);
-              if (!snap.exists()) { push?.('No saved data for previous week', 'info'); return; }
-              const data = snap.data() as PersistedState;
-              if (data?.weekly) {
-                setWeekly({ ...weekly, benchmarks: data.weekly.benchmarks, customTypes: data.weekly.customTypes });
-                saveGlobalTypes(data.weekly.customTypes || []);
-                // persist to current week doc
-                await setDoc(doc(db, 'users', uid, 'state', weekly.weekOfISO), { weekly: { ...weekly, benchmarks: data.weekly.benchmarks, customTypes: data.weekly.customTypes } }, { merge: true });
-                push?.('Copied previous week settings', 'success');
-              }
-            } catch (e) { console.error('Copy previous week failed', e); push?.('Failed to copy previous week', 'error'); }
-          }}>Copy previous week</Button>
           <Button variant="secondary" onClick={async () => {
             const uid = auth.currentUser?.uid;
             if (!uid) { push?.('Sign in to save settings', 'info'); return; }
