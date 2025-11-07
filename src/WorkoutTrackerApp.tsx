@@ -71,8 +71,11 @@ function cn(...classes: (string | false | undefined)[]) {
 function getMonday(date?: Date): Date {
   const d = date ? new Date(date) : new Date();
   const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
-  return new Date(d.setDate(diff));
+  const diff = (day === 0 ? -6 : 1) - day; // Calculate days to Monday
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + diff);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
 }
 
 function toISO(date: Date): string {
@@ -652,6 +655,7 @@ function WeeklyBenchmarkStack({
   onUpdateWeek: (week: WeeklyPlan) => void;
 }) {
   const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set());
+  const [visibleCount, setVisibleCount] = useState(24); // Show 24 weeks at a time
   
   console.log('[WeeklyBenchmarkStack] Rendering with previousWeeks:', previousWeeks.length, previousWeeks);
   
@@ -664,6 +668,14 @@ function WeeklyBenchmarkStack({
     }
     setExpandedWeeks(newExpanded);
   };
+
+  const loadMore = () => {
+    setVisibleCount(prev => prev + 24);
+  };
+
+  // Get visible weeks (most recent first)
+  const visibleWeeks = previousWeeks.slice(0, visibleCount);
+  const hasMore = previousWeeks.length > visibleCount;
 
   // Calculate week stats for summary
   const calculateWeekStats = (weekly: WeeklyPlan) => {
@@ -701,7 +713,7 @@ function WeeklyBenchmarkStack({
         </span>
       </div>
 
-      {previousWeeks.map((week, index) => {
+      {visibleWeeks.map((week, index) => {
         const isExpanded = expandedWeeks.has(week.weekNumber || index);
         const stats = calculateWeekStats(week);
 
@@ -758,6 +770,19 @@ function WeeklyBenchmarkStack({
           </Card>
         );
       })}
+
+      {/* Load More Button */}
+      {hasMore && (
+        <div className="flex justify-center pt-6">
+          <Button 
+            onClick={loadMore}
+            variant="outline"
+            className="px-8 py-3 text-base"
+          >
+            Load More ({previousWeeks.length - visibleCount} older weeks)
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -927,6 +952,7 @@ export default function WorkoutTrackerApp() {
     });
   }, [weekly.weekOfISO]);
   const [previousWeeks, setPreviousWeeks] = useState<WeeklyPlan[]>([]);
+  const [programStartDate, setProgramStartDate] = useState<string>('2025-09-22'); // Start date of current program
   const [session, setSession] = useState<ResistanceSession>(defaultSession());
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
@@ -1031,6 +1057,22 @@ export default function WorkoutTrackerApp() {
               const data = wSnap.data() as PersistedState;
               console.debug('[WT] Found existing weekly data for current week:', { weekISO: currentWeekISO, data });
               if (data?.weekly) {
+                // Validate that the stored weekOfISO is actually a Monday
+                const storedWeekISO = data.weekly.weekOfISO;
+                const storedDate = new Date(storedWeekISO + 'T00:00:00');
+                const storedDayOfWeek = storedDate.getDay();
+                
+                // If stored weekOfISO is not a Monday (day 1), fix it
+                if (storedDayOfWeek !== 1) {
+                  console.warn('[WT] Stored weekOfISO is not a Monday!', {
+                    stored: storedWeekISO,
+                    dayOfWeek: storedDayOfWeek,
+                    shouldBe: currentWeekISO
+                  });
+                  // Force use the correctly calculated Monday
+                  data.weekly.weekOfISO = currentWeekISO;
+                }
+                
                 // dedupe types and normalize
                 const uniq = ensureUniqueTypes(data.weekly.customTypes || []);
                 let normalized = normalizeWeekly({ ...data.weekly, customTypes: uniq, weekOfISO: currentWeekISO } as WeeklyPlan);
@@ -1105,8 +1147,23 @@ export default function WorkoutTrackerApp() {
                     const currentMonday = getMonday();
                     console.debug('[WT] Loading previous weeks, current Monday:', toISO(currentMonday));
                     
-                    // Load previous 4 weeks
-                    for (let i = 1; i <= 4; i++) {
+                    // Load all previous weeks since program start (no limit)
+                    const startDate = new Date(programStartDate + 'T00:00:00');
+                    const startMonday = getMonday(startDate);
+                    const currentWeekNumber = Math.floor((currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+                    const weeksToLoad = currentWeekNumber - 1; // Load ALL previous weeks, no limit
+                    
+                    console.debug(`[WT] Loading ${weeksToLoad} previous weeks (current week: ${currentWeekNumber})`, {
+                      programStartDate,
+                      startDate: startDate.toISOString(),
+                      startMonday: toISO(startMonday),
+                      currentMonday: toISO(currentMonday),
+                      millisDiff: currentMonday.getTime() - startMonday.getTime(),
+                      daysDiff: (currentMonday.getTime() - startMonday.getTime()) / (24 * 60 * 60 * 1000),
+                      weeksDiff: (currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)
+                    });
+                    
+                    for (let i = 1; i <= weeksToLoad; i++) {
                       const prevMonday = new Date(currentMonday);
                       prevMonday.setDate(currentMonday.getDate() - (7 * i)); // Go back i weeks
                       const prevMondayISO = toISO(prevMonday);
@@ -1142,20 +1199,20 @@ export default function WorkoutTrackerApp() {
                     // Sort by date descending (most recent first) then assign sequential week numbers
                     prevWeeksData.sort((a, b) => new Date(b.weekOfISO).getTime() - new Date(a.weekOfISO).getTime());
                     
-                    // Assign sequential week numbers based on chronological order
-                    // Most recent week gets the highest number
-                    const totalWeeks = prevWeeksData.length + 1; // +1 for current week
-                    prevWeeksData.forEach((weekData, index) => {
-                      weekData.weekNumber = totalWeeks - index - 1; // -1 because current week gets the highest number
+                    // Assign week numbers to previous weeks based on their date (already calculated above)
+                    prevWeeksData.forEach((weekData) => {
+                      const weekMonday = new Date(weekData.weekOfISO + 'T00:00:00');
+                      weekData.weekNumber = Math.floor((weekMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
                     });
                     
-                    // Update current week number too
-                    setWeekly(prev => ({ ...prev, weekNumber: totalWeeks }));
+                    // Update current week number
+                    setWeekly(prev => ({ ...prev, weekNumber: currentWeekNumber }));
                     
                     setPreviousWeeks(prevWeeksData);
                     console.debug('[WT] Final previous weeks loaded with sequential numbering', { 
                       count: prevWeeksData.length, 
-                      currentWeekNumber: totalWeeks,
+                      currentWeekNumber: currentWeekNumber,
+                      startMonday: toISO(startMonday),
                       weeks: prevWeeksData.map(w => ({ 
                         weekNumber: w.weekNumber, 
                         weekOfISO: w.weekOfISO,
@@ -1299,6 +1356,18 @@ export default function WorkoutTrackerApp() {
             }
           } catch (e) {
             console.warn('Failed to load settings/types from Firestore', e);
+          }
+          // load program settings (start date)
+          try {
+            const programRef = doc(db, 'users', u.uid, 'settings', 'program');
+            const pSnap = await getDoc(programRef);
+            if (pSnap.exists()) {
+              const data = pSnap.data() as any;
+              if (data?.programStartDate) setProgramStartDate(data.programStartDate);
+              console.debug('[WT] Loaded program settings', { programStartDate: data?.programStartDate });
+            }
+          } catch (e) {
+            console.warn('Failed to load program settings from Firestore', e);
           }
           // finished initial load; enable autosave
           setInitialized(true);
@@ -1568,7 +1637,13 @@ export default function WorkoutTrackerApp() {
           </TabsList>
 
       <TabsContent value="week" className="mt-4">
-        <WeeklyTracker weekly={weekly} setWeekly={setWeekly} push={appToasts.push} />
+        <WeeklyTracker 
+          weekly={weekly} 
+          setWeekly={setWeekly} 
+          push={appToasts.push} 
+          programStartDate={programStartDate}
+          setProgramStartDate={setProgramStartDate}
+        />
         
         {/* Weekly Benchmark Stack - Previous weeks as collapsible benchmark charts */}
         <WeeklyBenchmarkStack 
@@ -1842,14 +1917,19 @@ function WeeklyTracker({
   weekly,
   setWeekly,
   push,
+  programStartDate,
+  setProgramStartDate,
 }: {
   weekly: WeeklyPlan;
   setWeekly: (w: WeeklyPlan) => void;
   push?: (text: string, kind?: 'info'|'success'|'error') => void;
+  programStartDate: string;
+  setProgramStartDate: (d: string) => void;
 }) {
   const types = weekly.customTypes;
   const [typesPanelOpen, setTypesPanelOpen] = useState(false);
   const [editTypeModal, setEditTypeModal] = useState<{ type: string; name: string; category: string } | null>(null);
+  const [showProgramSettings, setShowProgramSettings] = useState(false);
   
   // Comment modal state
   const [commentModal, setCommentModal] = useState<{ 
@@ -2061,7 +2141,14 @@ function WeeklyTracker({
     <Card className="bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
       <CardHeader className="flex items-center justify-between bg-gradient-to-r from-slate-50 to-blue-50">
         <div>
-          <CardTitle className="text-2xl font-bold text-slate-800">Week of {prettyRange}</CardTitle>
+          <CardTitle className="text-2xl font-bold text-slate-800">
+            Week of {prettyRange}
+            {weekly.weekNumber && (
+              <span className="ml-3 text-lg font-normal text-slate-600">
+                (Week {weekly.weekNumber})
+              </span>
+            )}
+          </CardTitle>
           <p className="text-sm text-slate-600">Click cells to toggle what you did each day.</p>
         </div>
         <div className="flex gap-2">
@@ -2108,6 +2195,9 @@ function WeeklyTracker({
             } catch (e) { console.error('Save settings failed', e); push?.('Failed to save settings', 'error'); }
           }} className="bg-white hover:bg-slate-50">
             <Save className="mr-2 h-4 w-4" /> Save settings
+          </Button>
+          <Button variant="outline" onClick={() => setShowProgramSettings(true)}>
+            Program Settings
           </Button>
           {/* Rebuild from sessions removed per user request */}
           {/* Clear/repair buttons removed from header per user request */}
@@ -2480,6 +2570,69 @@ function WeeklyTracker({
         </div>
       </CardContent>
       
+      {/* Program Settings Modal */}
+      {showProgramSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">
+              Week Count Settings
+            </h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Program Start Date
+                </label>
+                <p className="text-sm text-gray-600 bg-gray-50 rounded-md p-3">
+                  {new Date(programStartDate + 'T00:00').toLocaleDateString(undefined, { 
+                    weekday: 'long', 
+                    month: 'long', 
+                    day: 'numeric',
+                    year: 'numeric'
+                  })}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Currently on Week {weekly.weekNumber}
+                </p>
+              </div>
+              <div className="pt-2 border-t">
+                <p className="text-sm text-gray-600 mb-3">
+                  Reset the week count to start a new program cycle. This will set the start date to this week's Monday and restart at Week 1.
+                  <strong className="block mt-2">Note: All your previous weeks' data will be preserved and remain visible in the Previous Weeks section.</strong>
+                </p>
+                <Button 
+                  variant="outline" 
+                  onClick={async () => {
+                    const newStartDate = toISO(getMonday(new Date()));
+                    setProgramStartDate(newStartDate);
+                    setWeekly({
+                      ...weekly,
+                      weekNumber: 1
+                    });
+                    // Save to Firestore (data is preserved, only start date changes)
+                    const uid = auth.currentUser?.uid;
+                    if (uid) {
+                      await setDoc(doc(db, 'users', uid, 'settings', 'program'), {
+                        programStartDate: newStartDate
+                      }, { merge: true });
+                    }
+                    if (push) push('Week count reset to 1. All previous data preserved!', 'success');
+                    setShowProgramSettings(false);
+                  }}
+                  className="w-full"
+                >
+                  Reset to Week 1
+                </Button>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <Button variant="outline" onClick={() => setShowProgramSettings(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Comment Modal */}
       {commentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
