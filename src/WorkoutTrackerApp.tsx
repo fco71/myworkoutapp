@@ -135,7 +135,6 @@ function useToasts() {
 }
 
 // --- localStorage helpers for global types ---
-const LS_TYPES_KEY = "workout:types";
 function loadGlobalTypes(): string[] {
   try {
     // Disabled localStorage fallback — Firestore is authoritative
@@ -421,14 +420,7 @@ function playWorkoutCompletionSound() {
 
 // rebuildWeeklyFromSessions removed — weekly state is authoritative and driven by checkbox 'workouts' only
 
-function saveGlobalTypes(types: string[], categories?: Record<string, string>) {
-  try {
-    // Intentionally no-op: avoid persisting types to localStorage in source
-    return;
-  } catch (e) {
-    console.warn("Failed to save global types", e);
-  }
-}
+// Note: global types are now sourced from Firestore; localStorage helpers removed.
 
 function defaultSession(): ResistanceSession {
   return {
