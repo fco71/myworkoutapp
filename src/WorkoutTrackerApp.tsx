@@ -138,25 +138,18 @@ function useToasts() {
 const LS_TYPES_KEY = "workout:types";
 function loadGlobalTypes(): string[] {
   try {
-    const raw = localStorage.getItem(LS_TYPES_KEY);
-    if (!raw) return ["Bike", "Calves", "Rings"];
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed.types)) return parsed.types;
-    if (Array.isArray(parsed)) return parsed;
-    return ["Bike", "Calves", "Rings"];
+    // Disabled localStorage fallback — Firestore is authoritative
+    return [];
   } catch {
-    return ["Bike", "Calves", "Rings"];
+    return [];
   }
 }
 function loadTypeCategories(): Record<string, string> {
   try {
-    const raw = localStorage.getItem(LS_TYPES_KEY);
-    if (!raw) return { Bike: 'Cardio', Calves: 'None', Rings: 'Resistance' };
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && parsed.categories) return parsed.categories;
-    return { Bike: 'Cardio', Calves: 'None', Rings: 'Resistance' };
+    // Disabled localStorage fallback for categories
+    return {};
   } catch {
-    return { Bike: 'Cardio', Calves: 'None', Rings: 'Resistance' };
+    return {};
   }
 }
 
@@ -430,17 +423,8 @@ function playWorkoutCompletionSound() {
 
 function saveGlobalTypes(types: string[], categories?: Record<string, string>) {
   try {
-    const payload: any = { types };
-    if (categories) payload.categories = categories;
-    // preserve existing categories if present and not overwritten
-    try {
-      const raw = localStorage.getItem(LS_TYPES_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (!payload.categories && parsed && parsed.categories) payload.categories = parsed.categories;
-      }
-    } catch {}
-    localStorage.setItem(LS_TYPES_KEY, JSON.stringify(payload));
+    // Intentionally no-op: avoid persisting types to localStorage in source
+    return;
   } catch (e) {
     console.warn("Failed to save global types", e);
   }
@@ -1340,16 +1324,16 @@ export default function WorkoutTrackerApp() {
               if (Array.isArray(t) && t.length > 0) {
                   const custom = ensureUniqueTypes(t);
                   console.debug('[WT] Loaded global types from settings', safeString({ uid: u.uid, custom, categories: cats }));
-                  // apply both custom types and categories to weekly state
-                  setWeekly((prev) => normalizeWeekly({ ...prev, customTypes: custom, typeCategories: { ...(prev.typeCategories || {}), ...(cats || {}) } } as WeeklyPlan));
-                  // persist categories to localStorage for fast local loads
-                  try { saveGlobalTypes(custom, { ...(loadTypeCategories() || {}), ...(cats || {}) }); } catch (e) { /* ignore */ }
+                  // Only apply global types to weekly state if the weekly has no custom types yet
+                  setWeekly((prev) => {
+                    if (prev.customTypes && prev.customTypes.length > 0) return prev;
+                    return normalizeWeekly({ ...prev, customTypes: custom, typeCategories: { ...(prev.typeCategories || {}), ...(cats || {}) } } as WeeklyPlan);
+                  });
               } else if (cats && Object.keys(cats).length > 0) {
-                  // if only categories present, merge into weekly and persist locally
+                  // if only categories present, merge into weekly (never overwrite existing categories blindly)
                   console.debug('[WT] Loaded categories from settings', safeString({ uid: u.uid, categories: cats }));
                   setWeekly((prev) => {
                     const updated = { ...prev, typeCategories: { ...(prev.typeCategories || {}), ...(cats || {}) } } as WeeklyPlan;
-                    try { saveGlobalTypes(updated.customTypes || loadGlobalTypes(), { ...(loadTypeCategories() || {}), ...(cats || {}) }); } catch (e) { /* ignore */ }
                     return normalizeWeekly(updated);
                   });
               }
@@ -1980,16 +1964,15 @@ function WeeklyTracker({
     updatedCats[name] = newTypeCategory || 'None';
     const updated = { ...weekly, customTypes: [...weekly.customTypes, name], benchmarks: { ...weekly.benchmarks, [name]: 0 }, typeCategories: updatedCats };
     setWeekly(updated);
-    saveGlobalTypes(updated.customTypes, updatedCats);
-    // save to Firestore if user signed in
+    // Persist new type to current week's state document (Firestore authoritative)
     (async () => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
       try {
-        const ref = doc(db, 'users', uid, 'settings', 'types');
-        await setDoc(ref, { types: updated.customTypes, categories: updated.typeCategories || {} }, { merge: true });
+        const ref = doc(db, 'users', uid, 'state', updated.weekOfISO);
+        await setDoc(ref, { weekly: updated }, { merge: true });
       } catch (e) {
-        console.warn('Failed to save types to Firestore', e);
+        console.warn('Failed to save new type to current week state', e);
       }
     })();
     setNewTypeName("");
@@ -2006,14 +1989,20 @@ function WeeklyTracker({
       delete types[name];
       return { ...d, types };
     });
-  const newCats = { ...(weekly.typeCategories || {}) };
-  delete newCats[name];
-  setWeekly({ ...weekly, customTypes, benchmarks, days, typeCategories: newCats });
-  saveGlobalTypes(customTypes, newCats);
+    const newCats = { ...(weekly.typeCategories || {}) };
+    delete newCats[name];
+    const updatedWeekly = { ...weekly, customTypes, benchmarks, days, typeCategories: newCats } as WeeklyPlan;
+    setWeekly(updatedWeekly);
+    // Persist removal to current week's state document only
     (async () => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      try { await setDoc(doc(db, 'users', uid, 'settings', 'types'), { types: customTypes, categories: newCats }, { merge: true }); } catch (e) { console.warn('Failed to save types to Firestore', e); }
+      try {
+        const ref = doc(db, 'users', uid, 'state', updatedWeekly.weekOfISO);
+        await setDoc(ref, { weekly: updatedWeekly }, { merge: true });
+      } catch (e) {
+        console.warn('Failed to persist type removal to current week', e);
+      }
     })();
   };
 
@@ -2035,12 +2024,18 @@ function WeeklyTracker({
   // also update categories mapping
   const cats: Record<string,string> = {};
   Object.keys(weekly.typeCategories || {}).forEach(k => { cats[k === oldName ? newName : k] = weekly.typeCategories?.[k] ?? 'None'; });
-  setWeekly({ ...weekly, customTypes, benchmarks, days, typeCategories: cats });
-  saveGlobalTypes(customTypes, cats);
+  const updatedWeekly = { ...weekly, customTypes, benchmarks, days, typeCategories: cats } as WeeklyPlan;
+  setWeekly(updatedWeekly);
+    // Persist rename to current week's state document
     (async () => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      try { await setDoc(doc(db, 'users', uid, 'settings', 'types'), { types: customTypes, categories: cats }, { merge: true }); } catch (e) { console.warn('Failed to save types to Firestore', e); }
+      try {
+        const ref = doc(db, 'users', uid, 'state', updatedWeekly.weekOfISO);
+        await setDoc(ref, { weekly: updatedWeekly }, { merge: true });
+      } catch (e) {
+        console.warn('Failed to persist type rename to current week', e);
+      }
     })();
   };
 
@@ -2231,13 +2226,14 @@ function WeeklyTracker({
                     updatedCats[t] = newCat;
                     const updated = { ...weekly, typeCategories: updatedCats } as WeeklyPlan;
                     setWeekly(normalizeWeekly(updated));
-                    saveGlobalTypes(updated.customTypes, updatedCats);
                     // open the types panel so users discover categorization
                     setTypesPanelOpen(true);
-                    const uid = auth.currentUser?.uid;
-                    if (uid) {
-                      try { await setDoc(doc(db, 'users', uid, 'settings', 'types'), { categories: updatedCats, types: updated.customTypes }, { merge: true }); } catch (e) { console.warn('Failed to save categories to Firestore', e); }
-                    }
+                    // Persist category change to current week's state document
+                    (async () => {
+                      const uid = auth.currentUser?.uid;
+                      if (!uid) return;
+                      try { await setDoc(doc(db, 'users', uid, 'state', updated.weekOfISO), { weekly: updated }, { merge: true }); } catch (e) { console.warn('Failed to save categories to current week state', e); }
+                    })();
                   }} className="text-xs p-1 border rounded">
                     <option>None</option>
                     <option>Cardio</option>
