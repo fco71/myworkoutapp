@@ -513,6 +513,11 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
     return acc + Object.keys(d.types || {}).filter(t => d.types[t] && (typeCats[t] === 'Mindfulness' || t === 'Mindfulness')).length;
   }, 0);
 
+  // Only show summary cards for categories that have at least one mapped type
+  const hasResistanceCategory = Object.values(typeCats).some((v) => v === 'Resistance');
+  const hasCardioCategory = Object.values(typeCats).some((v) => v === 'Cardio');
+  const hasMindfulnessCategory = Object.values(typeCats).some((v) => v === 'Mindfulness');
+
   // debug: compute unique session ids across the week and show per-day details
     try {
     const allIds: string[] = [];
@@ -569,54 +574,60 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
       </Card>
 
   {/* Resistance Progress */}
-      <Card className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white border-0 shadow-lg">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-emerald-100 text-sm font-medium">Resistance Training</p>
-              <p className="text-3xl font-bold">{resistanceCount}</p>
-              <p className="text-emerald-200 text-xs">Done this week</p>
+      {hasResistanceCategory && (
+        <Card className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white border-0 shadow-lg">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-emerald-100 text-sm font-medium">Resistance Training</p>
+                <p className="text-3xl font-bold">{resistanceCount}</p>
+                <p className="text-emerald-200 text-xs">Done this week</p>
+              </div>
+              <div className="w-12 h-12 bg-emerald-400 rounded-full flex items-center justify-center">
+                <span className="text-2xl">💪</span>
+              </div>
             </div>
-            <div className="w-12 h-12 bg-emerald-400 rounded-full flex items-center justify-center">
-              <span className="text-2xl">💪</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Cardio Progress */}
-      <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-orange-100 text-sm font-medium">Cardio</p>
-              <p className="text-3xl font-bold">{cardioCount}</p>
-              <p className="text-orange-200 text-xs">Done this week</p>
-            </div>
-            <div className="w-12 h-12 bg-orange-400 rounded-full flex items-center justify-center">
-              <span className="text-2xl">🏃</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-      {/* Mindfulness Progress */}
-      <Card className="bg-gradient-to-br from-emerald-300 to-emerald-400 text-white border-0 shadow-lg">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-emerald-100 text-sm font-medium">Mindfulness</p>
-              <div className="flex items-center gap-2">
-                <p className="text-3xl font-bold">{mindfulnessCount}</p>
-                {/* inline info icon removed per request; tooltip is available in Manage types help */}
+      {hasCardioCategory && (
+        <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-orange-100 text-sm font-medium">Cardio</p>
+                <p className="text-3xl font-bold">{cardioCount}</p>
+                <p className="text-orange-200 text-xs">Done this week</p>
               </div>
-              <p className="text-emerald-200 text-xs">Done this week</p>
+              <div className="w-12 h-12 bg-orange-400 rounded-full flex items-center justify-center">
+                <span className="text-2xl">🏃</span>
+              </div>
             </div>
-            <div className="w-12 h-12 bg-emerald-200 rounded-full flex items-center justify-center">
-              <span className="text-2xl">🧘</span>
+          </CardContent>
+        </Card>
+      )}
+      {/* Mindfulness Progress */}
+      {hasMindfulnessCategory && (
+        <Card className="bg-gradient-to-br from-emerald-300 to-emerald-400 text-white border-0 shadow-lg">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-emerald-100 text-sm font-medium">Mindfulness</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-3xl font-bold">{mindfulnessCount}</p>
+                  {/* inline info icon removed per request; tooltip is available in Manage types help */}
+                </div>
+                <p className="text-emerald-200 text-xs">Done this week</p>
+              </div>
+              <div className="w-12 h-12 bg-emerald-200 rounded-full flex items-center justify-center">
+                <span className="text-2xl">🧘</span>
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
       </div>
     </div>
   );
