@@ -1064,6 +1064,22 @@ export default function WorkoutTrackerApp() {
             const fallbackUsername = u.displayName || u.email?.split('@')[0] || 'User';
             setUserName(fallbackUsername);
           }
+          // Load program start date FIRST so week number and previous weeks use the correct value (not stale state)
+          let loadedProgramStartDate = programStartDate;
+          try {
+            const programRef = doc(db, 'users', u.uid, 'settings', 'program');
+            const pSnap = await getDoc(programRef);
+            if (pSnap.exists()) {
+              const data = pSnap.data() as any;
+              if (data?.programStartDate) {
+                loadedProgramStartDate = data.programStartDate;
+                setProgramStartDate(data.programStartDate);
+                console.debug('[WT] Loaded program start date (before weekly load):', data.programStartDate);
+              }
+            }
+          } catch (e) {
+            console.warn('[WT] Failed to load program settings first', e);
+          }
           // Prefer per-week document keyed by weekOfISO. Fall back to the legacy 'tracker' doc.
           try {
             const currentMonday = getMonday();
@@ -1166,17 +1182,18 @@ export default function WorkoutTrackerApp() {
                     console.debug('[WT] Loading previous weeks, current Monday:', toISO(currentMonday));
                     
                     // Load all previous weeks since program start (no limit)
-                    const startDate = new Date(programStartDate + 'T00:00:00');
+                    const startDate = new Date(loadedProgramStartDate + 'T00:00:00');
                     const startMonday = getMonday(startDate);
                     const currentWeekNumber = Math.floor((currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
-                    const weeksToLoad = currentWeekNumber - 1; // Load ALL previous weeks, no limit
+                    // Always load at least 12 previous weeks so history is never empty (even when "Week 1")
+                    const weeksToLoad = Math.max(currentWeekNumber - 1, 12);
                     
                     // Get customTypes from current week to use for empty weeks
                     const currentCustomTypes = normalized.customTypes || [];
                     const currentTypeCategories = normalized.typeCategories || {};
                     
                     console.debug(`[WT] Loading ${weeksToLoad} previous weeks (current week: ${currentWeekNumber})`, {
-                      programStartDate,
+                      loadedProgramStartDate,
                       startDate: startDate.toISOString(),
                       startMonday: toISO(startMonday),
                       currentMonday: toISO(currentMonday),
@@ -1251,7 +1268,7 @@ export default function WorkoutTrackerApp() {
                     });
                   } catch (e) {
                     console.warn('[WT] Failed to load previous weeks data', e);
-                    setPreviousWeeks([]);
+                    // Do not clear previousWeeks on error - avoids wiping history on transient failures
                   }
               }
               if (data?.session) setSession(data.session);
@@ -1353,6 +1370,42 @@ export default function WorkoutTrackerApp() {
                     console.warn('[WT] Failed to auto-save benchmarks:', e);
                   }
                 }
+              }
+              // Load previous weeks when current week doc was missing, so history is never empty
+              try {
+                const startDate = new Date(loadedProgramStartDate + 'T00:00:00');
+                const startMonday = getMonday(startDate);
+                const currentWeekNumber = Math.max(1, Math.floor((currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1);
+                const weeksToLoad = Math.max(currentWeekNumber - 1, 12);
+                const currentCustomTypes = customTypesFromPrevWeek.length > 0 ? customTypesFromPrevWeek : loadGlobalTypes();
+                const currentTypeCategories = loadTypeCategories();
+                const prevWeeksData: WeeklyPlan[] = [];
+                for (let i = 1; i <= weeksToLoad; i++) {
+                  const weekMonday = new Date(currentMonday);
+                  weekMonday.setDate(currentMonday.getDate() - (7 * i));
+                  const prevWeekRef = doc(db, 'users', u.uid, 'state', toISO(weekMonday));
+                  const prevSnap = await getDoc(prevWeekRef);
+                  if (prevSnap.exists()) {
+                    const prevData = prevSnap.data() as PersistedState;
+                    if (prevData?.weekly) {
+                      const prevUniq = ensureUniqueTypes(prevData.weekly.customTypes || []);
+                      prevWeeksData.push(normalizeWeekly({ ...prevData.weekly, customTypes: prevUniq } as WeeklyPlan));
+                    } else {
+                      prevWeeksData.push(createEmptyWeek(weekMonday, currentCustomTypes, currentTypeCategories));
+                    }
+                  } else {
+                    prevWeeksData.push(createEmptyWeek(weekMonday, currentCustomTypes, currentTypeCategories));
+                  }
+                }
+                prevWeeksData.sort((a, b) => new Date(b.weekOfISO).getTime() - new Date(a.weekOfISO).getTime());
+                prevWeeksData.forEach((weekData) => {
+                  const weekMonday = new Date(weekData.weekOfISO + 'T00:00:00');
+                  weekData.weekNumber = Math.floor((weekMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+                });
+                setPreviousWeeks(prevWeeksData);
+                setWeekly(prev => ({ ...prev, weekNumber: currentWeekNumber }));
+              } catch (e) {
+                console.warn('[WT] Failed to load previous weeks (no current week path)', e);
               }
             }
           } catch (e) {
