@@ -123,6 +123,37 @@ function defaultWeekly(): WeeklyPlan {
   };
 }
 
+// Helper function to create an empty week structure for a specific Monday date
+function createEmptyWeek(mondayDate: Date, customTypes: string[] = [], typeCategories: Record<string, string> = {}): WeeklyPlan {
+  const mondayISO = toISO(mondayDate);
+  const days = weekDates(mondayDate).map((d) => ({
+    dateISO: toISO(d),
+    types: {},
+    sessions: 0,
+    sessionsList: [],
+    comments: {},
+  }));
+  
+  // Use provided customTypes or fall back to defaults
+  const types = customTypes.length > 0 ? customTypes : ["Bike", "Row Machine", "Piano Practice", "Mindfulness"];
+  const categories = Object.keys(typeCategories).length > 0 ? typeCategories : { Bike: 'Cardio', "Row Machine": 'Cardio', "Piano Practice": 'Skills', Mindfulness: 'Mindfulness' };
+  
+  // Create empty benchmarks for each type
+  const benchmarks: Record<string, number> = {};
+  types.forEach(t => {
+    benchmarks[t] = 0;
+  });
+  
+  return {
+    weekOfISO: mondayISO,
+    weekNumber: 1, // Will be recalculated later
+    days,
+    benchmarks,
+    customTypes: types,
+    typeCategories: categories,
+  };
+}
+
 // --- Toast helper (non-blocking feedback) ---
 function useToasts() {
   const [messages, setMessages] = useState<{ id: string; text: string; kind?: 'info' | 'success' | 'error' }[]>([]);
@@ -1140,6 +1171,10 @@ export default function WorkoutTrackerApp() {
                     const currentWeekNumber = Math.floor((currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
                     const weeksToLoad = currentWeekNumber - 1; // Load ALL previous weeks, no limit
                     
+                    // Get customTypes from current week to use for empty weeks
+                    const currentCustomTypes = normalized.customTypes || [];
+                    const currentTypeCategories = normalized.typeCategories || {};
+                    
                     console.debug(`[WT] Loading ${weeksToLoad} previous weeks (current week: ${currentWeekNumber})`, {
                       programStartDate,
                       startDate: startDate.toISOString(),
@@ -1147,7 +1182,8 @@ export default function WorkoutTrackerApp() {
                       currentMonday: toISO(currentMonday),
                       millisDiff: currentMonday.getTime() - startMonday.getTime(),
                       daysDiff: (currentMonday.getTime() - startMonday.getTime()) / (24 * 60 * 60 * 1000),
-                      weeksDiff: (currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)
+                      weeksDiff: (currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000),
+                      currentCustomTypes
                     });
                     
                     for (let i = 1; i <= weeksToLoad; i++) {
@@ -1176,10 +1212,16 @@ export default function WorkoutTrackerApp() {
                             daysWithData: prevNormalized.days.filter(d => Object.keys(d.types || {}).length > 0).length
                           });
                         } else {
-                          console.debug(`[WT] No weekly data in document for ${prevMondayISO}`);
+                          // Document exists but no weekly data - create empty week structure
+                          console.debug(`[WT] No weekly data in document for ${prevMondayISO}, creating empty week`);
+                          const emptyWeek = createEmptyWeek(prevMonday, currentCustomTypes, currentTypeCategories);
+                          prevWeeksData.push(emptyWeek);
                         }
                       } else {
-                        console.debug(`[WT] No document found for ${prevMondayISO}`);
+                        // No document exists - create empty week structure so all weeks show in history
+                        console.debug(`[WT] No document found for ${prevMondayISO}, creating empty week`);
+                        const emptyWeek = createEmptyWeek(prevMonday, currentCustomTypes, currentTypeCategories);
+                        prevWeeksData.push(emptyWeek);
                       }
                     }
                     
