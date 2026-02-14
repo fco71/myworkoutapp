@@ -123,6 +123,37 @@ function defaultWeekly(): WeeklyPlan {
   };
 }
 
+// Helper function to create an empty week structure for a specific Monday date
+function createEmptyWeek(mondayDate: Date, customTypes: string[] = [], typeCategories: Record<string, string> = {}): WeeklyPlan {
+  const mondayISO = toISO(mondayDate);
+  const days = weekDates(mondayDate).map((d) => ({
+    dateISO: toISO(d),
+    types: {},
+    sessions: 0,
+    sessionsList: [],
+    comments: {},
+  }));
+  
+  // Use provided customTypes or fall back to defaults
+  const types = customTypes.length > 0 ? customTypes : ["Bike", "Row Machine", "Piano Practice", "Mindfulness"];
+  const categories = Object.keys(typeCategories).length > 0 ? typeCategories : { Bike: 'Cardio', "Row Machine": 'Cardio', "Piano Practice": 'Skills', Mindfulness: 'Mindfulness' };
+  
+  // Create empty benchmarks for each type
+  const benchmarks: Record<string, number> = {};
+  types.forEach(t => {
+    benchmarks[t] = 0;
+  });
+  
+  return {
+    weekOfISO: mondayISO,
+    weekNumber: 1, // Will be recalculated later
+    days,
+    benchmarks,
+    customTypes: types,
+    typeCategories: categories,
+  };
+}
+
 // --- Toast helper (non-blocking feedback) ---
 function useToasts() {
   const [messages, setMessages] = useState<{ id: string; text: string; kind?: 'info' | 'success' | 'error' }[]>([]);
@@ -135,28 +166,20 @@ function useToasts() {
 }
 
 // --- localStorage helpers for global types ---
-const LS_TYPES_KEY = "workout:types";
 function loadGlobalTypes(): string[] {
   try {
-    const raw = localStorage.getItem(LS_TYPES_KEY);
-    if (!raw) return ["Bike", "Calves", "Rings"];
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed.types)) return parsed.types;
-    if (Array.isArray(parsed)) return parsed;
-    return ["Bike", "Calves", "Rings"];
+    // Disabled localStorage fallback — Firestore is authoritative
+    return [];
   } catch {
-    return ["Bike", "Calves", "Rings"];
+    return [];
   }
 }
 function loadTypeCategories(): Record<string, string> {
   try {
-    const raw = localStorage.getItem(LS_TYPES_KEY);
-    if (!raw) return { Bike: 'Cardio', Calves: 'None', Rings: 'Resistance' };
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && parsed.categories) return parsed.categories;
-    return { Bike: 'Cardio', Calves: 'None', Rings: 'Resistance' };
+    // Disabled localStorage fallback for categories
+    return {};
   } catch {
-    return { Bike: 'Cardio', Calves: 'None', Rings: 'Resistance' };
+    return {};
   }
 }
 
@@ -428,23 +451,7 @@ function playWorkoutCompletionSound() {
 
 // rebuildWeeklyFromSessions removed — weekly state is authoritative and driven by checkbox 'workouts' only
 
-function saveGlobalTypes(types: string[], categories?: Record<string, string>) {
-  try {
-    const payload: any = { types };
-    if (categories) payload.categories = categories;
-    // preserve existing categories if present and not overwritten
-    try {
-      const raw = localStorage.getItem(LS_TYPES_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (!payload.categories && parsed && parsed.categories) payload.categories = parsed.categories;
-      }
-    } catch {}
-    localStorage.setItem(LS_TYPES_KEY, JSON.stringify(payload));
-  } catch (e) {
-    console.warn("Failed to save global types", e);
-  }
-}
+// Note: global types are now sourced from Firestore; localStorage helpers removed.
 
 function defaultSession(): ResistanceSession {
   return {
@@ -537,6 +544,11 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
     return acc + Object.keys(d.types || {}).filter(t => d.types[t] && (typeCats[t] === 'Mindfulness' || t === 'Mindfulness')).length;
   }, 0);
 
+  // Only show summary cards for categories that have at least one mapped type
+  const hasResistanceCategory = Object.values(typeCats).some((v) => v === 'Resistance');
+  const hasCardioCategory = Object.values(typeCats).some((v) => v === 'Cardio');
+  const hasMindfulnessCategory = Object.values(typeCats).some((v) => v === 'Mindfulness');
+
   // debug: compute unique session ids across the week and show per-day details
     try {
     const allIds: string[] = [];
@@ -593,54 +605,60 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
       </Card>
 
   {/* Resistance Progress */}
-      <Card className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white border-0 shadow-lg">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-emerald-100 text-sm font-medium">Resistance Training</p>
-              <p className="text-3xl font-bold">{resistanceCount}</p>
-              <p className="text-emerald-200 text-xs">Done this week</p>
+      {hasResistanceCategory && (
+        <Card className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white border-0 shadow-lg">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-emerald-100 text-sm font-medium">Resistance Training</p>
+                <p className="text-3xl font-bold">{resistanceCount}</p>
+                <p className="text-emerald-200 text-xs">Done this week</p>
+              </div>
+              <div className="w-12 h-12 bg-emerald-400 rounded-full flex items-center justify-center">
+                <span className="text-2xl">💪</span>
+              </div>
             </div>
-            <div className="w-12 h-12 bg-emerald-400 rounded-full flex items-center justify-center">
-              <span className="text-2xl">💪</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Cardio Progress */}
-      <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-orange-100 text-sm font-medium">Cardio</p>
-              <p className="text-3xl font-bold">{cardioCount}</p>
-              <p className="text-orange-200 text-xs">Done this week</p>
-            </div>
-            <div className="w-12 h-12 bg-orange-400 rounded-full flex items-center justify-center">
-              <span className="text-2xl">🏃</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-      {/* Mindfulness Progress */}
-      <Card className="bg-gradient-to-br from-emerald-300 to-emerald-400 text-white border-0 shadow-lg">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-emerald-100 text-sm font-medium">Mindfulness</p>
-              <div className="flex items-center gap-2">
-                <p className="text-3xl font-bold">{mindfulnessCount}</p>
-                {/* inline info icon removed per request; tooltip is available in Manage types help */}
+      {hasCardioCategory && (
+        <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-orange-100 text-sm font-medium">Cardio</p>
+                <p className="text-3xl font-bold">{cardioCount}</p>
+                <p className="text-orange-200 text-xs">Done this week</p>
               </div>
-              <p className="text-emerald-200 text-xs">Done this week</p>
+              <div className="w-12 h-12 bg-orange-400 rounded-full flex items-center justify-center">
+                <span className="text-2xl">🏃</span>
+              </div>
             </div>
-            <div className="w-12 h-12 bg-emerald-200 rounded-full flex items-center justify-center">
-              <span className="text-2xl">🧘</span>
+          </CardContent>
+        </Card>
+      )}
+      {/* Mindfulness Progress */}
+      {hasMindfulnessCategory && (
+        <Card className="bg-gradient-to-br from-emerald-300 to-emerald-400 text-white border-0 shadow-lg">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-emerald-100 text-sm font-medium">Mindfulness</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-3xl font-bold">{mindfulnessCount}</p>
+                  {/* inline info icon removed per request; tooltip is available in Manage types help */}
+                </div>
+                <p className="text-emerald-200 text-xs">Done this week</p>
+              </div>
+              <div className="w-12 h-12 bg-emerald-200 rounded-full flex items-center justify-center">
+                <span className="text-2xl">🧘</span>
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
       </div>
     </div>
   );
@@ -1153,6 +1171,10 @@ export default function WorkoutTrackerApp() {
                     const currentWeekNumber = Math.floor((currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
                     const weeksToLoad = currentWeekNumber - 1; // Load ALL previous weeks, no limit
                     
+                    // Get customTypes from current week to use for empty weeks
+                    const currentCustomTypes = normalized.customTypes || [];
+                    const currentTypeCategories = normalized.typeCategories || {};
+                    
                     console.debug(`[WT] Loading ${weeksToLoad} previous weeks (current week: ${currentWeekNumber})`, {
                       programStartDate,
                       startDate: startDate.toISOString(),
@@ -1160,7 +1182,8 @@ export default function WorkoutTrackerApp() {
                       currentMonday: toISO(currentMonday),
                       millisDiff: currentMonday.getTime() - startMonday.getTime(),
                       daysDiff: (currentMonday.getTime() - startMonday.getTime()) / (24 * 60 * 60 * 1000),
-                      weeksDiff: (currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)
+                      weeksDiff: (currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000),
+                      currentCustomTypes
                     });
                     
                     for (let i = 1; i <= weeksToLoad; i++) {
@@ -1189,10 +1212,16 @@ export default function WorkoutTrackerApp() {
                             daysWithData: prevNormalized.days.filter(d => Object.keys(d.types || {}).length > 0).length
                           });
                         } else {
-                          console.debug(`[WT] No weekly data in document for ${prevMondayISO}`);
+                          // Document exists but no weekly data - create empty week structure
+                          console.debug(`[WT] No weekly data in document for ${prevMondayISO}, creating empty week`);
+                          const emptyWeek = createEmptyWeek(prevMonday, currentCustomTypes, currentTypeCategories);
+                          prevWeeksData.push(emptyWeek);
                         }
                       } else {
-                        console.debug(`[WT] No document found for ${prevMondayISO}`);
+                        // No document exists - create empty week structure so all weeks show in history
+                        console.debug(`[WT] No document found for ${prevMondayISO}, creating empty week`);
+                        const emptyWeek = createEmptyWeek(prevMonday, currentCustomTypes, currentTypeCategories);
+                        prevWeeksData.push(emptyWeek);
                       }
                     }
                     
@@ -1340,16 +1369,16 @@ export default function WorkoutTrackerApp() {
               if (Array.isArray(t) && t.length > 0) {
                   const custom = ensureUniqueTypes(t);
                   console.debug('[WT] Loaded global types from settings', safeString({ uid: u.uid, custom, categories: cats }));
-                  // apply both custom types and categories to weekly state
-                  setWeekly((prev) => normalizeWeekly({ ...prev, customTypes: custom, typeCategories: { ...(prev.typeCategories || {}), ...(cats || {}) } } as WeeklyPlan));
-                  // persist categories to localStorage for fast local loads
-                  try { saveGlobalTypes(custom, { ...(loadTypeCategories() || {}), ...(cats || {}) }); } catch (e) { /* ignore */ }
+                  // Only apply global types to weekly state if the weekly has no custom types yet
+                  setWeekly((prev) => {
+                    if (prev.customTypes && prev.customTypes.length > 0) return prev;
+                    return normalizeWeekly({ ...prev, customTypes: custom, typeCategories: { ...(prev.typeCategories || {}), ...(cats || {}) } } as WeeklyPlan);
+                  });
               } else if (cats && Object.keys(cats).length > 0) {
-                  // if only categories present, merge into weekly and persist locally
+                  // if only categories present, merge into weekly (never overwrite existing categories blindly)
                   console.debug('[WT] Loaded categories from settings', safeString({ uid: u.uid, categories: cats }));
                   setWeekly((prev) => {
                     const updated = { ...prev, typeCategories: { ...(prev.typeCategories || {}), ...(cats || {}) } } as WeeklyPlan;
-                    try { saveGlobalTypes(updated.customTypes || loadGlobalTypes(), { ...(loadTypeCategories() || {}), ...(cats || {}) }); } catch (e) { /* ignore */ }
                     return normalizeWeekly(updated);
                   });
               }
@@ -1980,16 +2009,15 @@ function WeeklyTracker({
     updatedCats[name] = newTypeCategory || 'None';
     const updated = { ...weekly, customTypes: [...weekly.customTypes, name], benchmarks: { ...weekly.benchmarks, [name]: 0 }, typeCategories: updatedCats };
     setWeekly(updated);
-    saveGlobalTypes(updated.customTypes, updatedCats);
-    // save to Firestore if user signed in
+    // Persist new type to current week's state document (Firestore authoritative)
     (async () => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
       try {
-        const ref = doc(db, 'users', uid, 'settings', 'types');
-        await setDoc(ref, { types: updated.customTypes, categories: updated.typeCategories || {} }, { merge: true });
+        const ref = doc(db, 'users', uid, 'state', updated.weekOfISO);
+        await setDoc(ref, { weekly: updated }, { merge: true });
       } catch (e) {
-        console.warn('Failed to save types to Firestore', e);
+        console.warn('Failed to save new type to current week state', e);
       }
     })();
     setNewTypeName("");
@@ -2006,14 +2034,20 @@ function WeeklyTracker({
       delete types[name];
       return { ...d, types };
     });
-  const newCats = { ...(weekly.typeCategories || {}) };
-  delete newCats[name];
-  setWeekly({ ...weekly, customTypes, benchmarks, days, typeCategories: newCats });
-  saveGlobalTypes(customTypes, newCats);
+    const newCats = { ...(weekly.typeCategories || {}) };
+    delete newCats[name];
+    const updatedWeekly = { ...weekly, customTypes, benchmarks, days, typeCategories: newCats } as WeeklyPlan;
+    setWeekly(updatedWeekly);
+    // Persist removal to current week's state document only
     (async () => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      try { await setDoc(doc(db, 'users', uid, 'settings', 'types'), { types: customTypes, categories: newCats }, { merge: true }); } catch (e) { console.warn('Failed to save types to Firestore', e); }
+      try {
+        const ref = doc(db, 'users', uid, 'state', updatedWeekly.weekOfISO);
+        await setDoc(ref, { weekly: updatedWeekly }, { merge: true });
+      } catch (e) {
+        console.warn('Failed to persist type removal to current week', e);
+      }
     })();
   };
 
@@ -2035,12 +2069,18 @@ function WeeklyTracker({
   // also update categories mapping
   const cats: Record<string,string> = {};
   Object.keys(weekly.typeCategories || {}).forEach(k => { cats[k === oldName ? newName : k] = weekly.typeCategories?.[k] ?? 'None'; });
-  setWeekly({ ...weekly, customTypes, benchmarks, days, typeCategories: cats });
-  saveGlobalTypes(customTypes, cats);
+  const updatedWeekly = { ...weekly, customTypes, benchmarks, days, typeCategories: cats } as WeeklyPlan;
+  setWeekly(updatedWeekly);
+    // Persist rename to current week's state document
     (async () => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      try { await setDoc(doc(db, 'users', uid, 'settings', 'types'), { types: customTypes, categories: cats }, { merge: true }); } catch (e) { console.warn('Failed to save types to Firestore', e); }
+      try {
+        const ref = doc(db, 'users', uid, 'state', updatedWeekly.weekOfISO);
+        await setDoc(ref, { weekly: updatedWeekly }, { merge: true });
+      } catch (e) {
+        console.warn('Failed to persist type rename to current week', e);
+      }
     })();
   };
 
@@ -2231,13 +2271,14 @@ function WeeklyTracker({
                     updatedCats[t] = newCat;
                     const updated = { ...weekly, typeCategories: updatedCats } as WeeklyPlan;
                     setWeekly(normalizeWeekly(updated));
-                    saveGlobalTypes(updated.customTypes, updatedCats);
                     // open the types panel so users discover categorization
                     setTypesPanelOpen(true);
-                    const uid = auth.currentUser?.uid;
-                    if (uid) {
-                      try { await setDoc(doc(db, 'users', uid, 'settings', 'types'), { categories: updatedCats, types: updated.customTypes }, { merge: true }); } catch (e) { console.warn('Failed to save categories to Firestore', e); }
-                    }
+                    // Persist category change to current week's state document
+                    (async () => {
+                      const uid = auth.currentUser?.uid;
+                      if (!uid) return;
+                      try { await setDoc(doc(db, 'users', uid, 'state', updated.weekOfISO), { weekly: updated }, { merge: true }); } catch (e) { console.warn('Failed to save categories to current week state', e); }
+                    })();
                   }} className="text-xs p-1 border rounded">
                     <option>None</option>
                     <option>Cardio</option>
