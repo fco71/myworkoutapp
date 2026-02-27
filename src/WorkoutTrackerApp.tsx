@@ -86,19 +86,6 @@ function arraysEqual<T>(a: T[], b: T[]): boolean {
   return a.length === b.length && a.every((val, index) => val === b[index]);
 }
 
-// Safe stringify helper for debugging (handles circulars)
-function safeString(o: any, space = 2) {
-  try {
-    return JSON.stringify(o, (_, v) => (typeof v === 'bigint' ? String(v) : v), space);
-  } catch (e) {
-    try {
-      return String(o);
-    } catch {
-      return '<unstringifiable>';
-    }
-  }
-}
-
 // --- Persistence (Firebase Firestore) ---
 type PersistedState = { weekly: WeeklyPlan; session: ResistanceSession };
 
@@ -1055,15 +1042,9 @@ function PreviousWeekTracker({
 // --- Components ---
 export default function WorkoutTrackerApp() {
   const [weekly, setWeekly] = useState<WeeklyPlan>(defaultWeekly());
-  console.debug('[WT] Initial weekly state:', { weekOfISO: weekly.weekOfISO, mondayFromState: new Date(weekly.weekOfISO).toDateString() });
   
   // Track whenever weekly state changes
   useEffect(() => {
-    console.debug('[WT] Weekly state changed:', { 
-      weekOfISO: weekly.weekOfISO, 
-      mondayFromState: new Date(weekly.weekOfISO).toDateString(),
-      stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n') 
-    });
   }, [weekly.weekOfISO]);
   const [previousWeeks, setPreviousWeeks] = useState<WeeklyPlan[]>([]);
   const [programStartDate, setProgramStartDate] = useState<string>('2025-09-22'); // Start date of current program
@@ -1080,8 +1061,7 @@ export default function WorkoutTrackerApp() {
   useEffect(() => {
     // Request notification permission for timer alarms
     if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission().then(permission => {
-      });
+      Notification.requestPermission();
     }
   }, []);
 
@@ -1144,15 +1124,12 @@ export default function WorkoutTrackerApp() {
             const profileSnap = await getDoc(profileRef);
             if (profileSnap.exists() && profileSnap.data().username) {
               const loadedUsername = profileSnap.data().username;
-              console.debug('Loaded username from Firestore:', loadedUsername);
               setUserName(loadedUsername);
             } else {
               // No username set yet, use display name as default and save it
               const defaultUsername = u.displayName || u.email?.split('@')[0] || 'User';
-              console.debug('No saved username, using default:', defaultUsername);
               setUserName(defaultUsername);
               await setDoc(profileRef, { username: defaultUsername, email: u.email }, { merge: true });
-              console.debug('Saved default username to Firestore');
             }
           } catch (e) {
             console.warn('Failed to load username, using fallback:', e);
@@ -1169,7 +1146,6 @@ export default function WorkoutTrackerApp() {
               if (data?.programStartDate) {
                 loadedProgramStartDate = data.programStartDate;
                 setProgramStartDate(data.programStartDate);
-                console.debug('[WT] Loaded program start date (before weekly load):', data.programStartDate);
               }
             }
           } catch (e) {
@@ -1179,12 +1155,10 @@ export default function WorkoutTrackerApp() {
           try {
             const currentMonday = getMonday();
             const currentWeekISO = toISO(currentMonday);
-            console.debug('[WT] Loading current week:', { currentMonday: currentMonday.toDateString(), currentWeekISO });
             const weekRef = doc(db, 'users', u.uid, 'state', currentWeekISO);
             const wSnap = await getDoc(weekRef);
             if (wSnap.exists()) {
               const data = wSnap.data() as PersistedState;
-              console.debug('[WT] Found existing weekly data for current week:', { weekISO: currentWeekISO, data });
               if (data?.weekly) {
                 // Validate that the stored weekOfISO is actually a Monday
                 const storedWeekISO = data.weekly.weekOfISO;
@@ -1211,7 +1185,6 @@ export default function WorkoutTrackerApp() {
                 const existingDates = normalized.days.map(d => d.dateISO);
                 
                 if (!arraysEqual(currentWeekDates, existingDates)) {
-                  console.debug('[WT] Days mismatch, regenerating for current week:', { expected: currentWeekDates, found: existingDates });
                   // Create new days array with current week dates, preserving existing data where possible
                   const newDays = currentWeekDates.map(dateISO => {
                     const existingDay = normalized.days.find(d => d.dateISO === dateISO);
@@ -1226,7 +1199,6 @@ export default function WorkoutTrackerApp() {
                   normalized = { ...normalized, days: newDays };
                 }
                 
-                console.debug('[WT] Loaded per-week state (corrected)', safeString({ uid: u.uid, week: currentWeekISO, normalized, correctedWeekOfISO: normalized.weekOfISO }));
                   // if the loaded weekly has no customTypes, merge defaults from local/global settings
                   if (!normalized.customTypes || normalized.customTypes.length === 0) {
                     const globals = loadGlobalTypes();
@@ -1237,7 +1209,6 @@ export default function WorkoutTrackerApp() {
                   try {
                     const snaps = await getDocs(collection(db, 'users', u.uid, 'sessions'));
                     const items = snaps.docs.map(s => ({ id: s.id, ...(s.data() as any) }));
-                    console.debug('[WT] sessions collection loaded', safeString({ uid: u.uid, count: items.length, sample: items.slice(0,5) }));
                       if (items.length > 0) {
                       // build map dateISO -> sessions
                       const dateMap: Record<string, any[]> = {};
@@ -1261,7 +1232,6 @@ export default function WorkoutTrackerApp() {
                       });
                       const days = normalized.days.map(d => ({ ...d, sessionsList: (dateMap[d.dateISO] || []).map(s => ({ id: s.id, sessionTypes: s.sessionTypes || [] })), sessions: (dateMap[d.dateISO] || []).length }));
                       normalized = { ...normalized, days };
-                      console.debug('[WT] Reconstructed sessionsList from sessions collection', safeString({ uid: u.uid, reconstructed: days.map(dd => ({ dateISO: dd.dateISO, sessions: dd.sessions, sessionsListLen: (dd.sessionsList||[]).length })) }));
                       // persist reconstructed weekly so subsequent loads use sessionsList
                       // Persist reconstructed weekly removed per app decision (weekly doc is authoritative)
                     }
@@ -1274,7 +1244,6 @@ export default function WorkoutTrackerApp() {
                   try {
                     const prevWeeksData: WeeklyPlan[] = [];
                     const currentMonday = getMonday();
-                    console.debug('[WT] Loading previous weeks, current Monday:', toISO(currentMonday));
                     
                     // Load all previous weeks since program start (no limit)
                     const startDate = new Date(loadedProgramStartDate + 'T00:00:00');
@@ -1286,52 +1255,30 @@ export default function WorkoutTrackerApp() {
                     // Get customTypes from current week to use for empty weeks
                     const currentCustomTypes = normalized.customTypes || [];
                     const currentTypeCategories = normalized.typeCategories || {};
-                    
-                    console.debug(`[WT] Loading ${weeksToLoad} previous weeks (current week: ${currentWeekNumber})`, {
-                      loadedProgramStartDate,
-                      startDate: startDate.toISOString(),
-                      startMonday: toISO(startMonday),
-                      currentMonday: toISO(currentMonday),
-                      millisDiff: currentMonday.getTime() - startMonday.getTime(),
-                      daysDiff: (currentMonday.getTime() - startMonday.getTime()) / (24 * 60 * 60 * 1000),
-                      weeksDiff: (currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000),
-                      currentCustomTypes
-                    });
-                    
+
                     for (let i = 1; i <= weeksToLoad; i++) {
                       const prevMonday = new Date(currentMonday);
                       prevMonday.setDate(currentMonday.getDate() - (7 * i)); // Go back i weeks
                       const prevMondayISO = toISO(prevMonday);
                       
-                      console.debug(`[WT] Checking week ${i}, Monday: ${prevMondayISO}`);
                       
                       const prevWeekRef = doc(db, 'users', u.uid, 'state', prevMondayISO);
                       const prevSnap = await getDoc(prevWeekRef);
                       
                       if (prevSnap.exists()) {
                         const prevData = prevSnap.data() as PersistedState;
-                        console.debug(`[WT] Found data for ${prevMondayISO}:`, prevData);
                         
                         if (prevData?.weekly) {
                           const prevUniq = ensureUniqueTypes(prevData.weekly.customTypes || []);
                           let prevNormalized = normalizeWeekly({ ...prevData.weekly, customTypes: prevUniq } as WeeklyPlan);
                           prevWeeksData.push(prevNormalized);
-                          console.debug('[WT] Loaded previous week', { 
-                            week: i, 
-                            weekNumber: prevNormalized.weekNumber, 
-                            date: prevMondayISO,
-                            customTypes: prevNormalized.customTypes,
-                            daysWithData: prevNormalized.days.filter(d => Object.keys(d.types || {}).length > 0).length
-                          });
                         } else {
                           // Document exists but no weekly data - create empty week structure
-                          console.debug(`[WT] No weekly data in document for ${prevMondayISO}, creating empty week`);
                           const emptyWeek = createEmptyWeek(prevMonday, currentCustomTypes, currentTypeCategories);
                           prevWeeksData.push(emptyWeek);
                         }
                       } else {
                         // No document exists - create empty week structure so all weeks show in history
-                        console.debug(`[WT] No document found for ${prevMondayISO}, creating empty week`);
                         const emptyWeek = createEmptyWeek(prevMonday, currentCustomTypes, currentTypeCategories);
                         prevWeeksData.push(emptyWeek);
                       }
@@ -1350,17 +1297,6 @@ export default function WorkoutTrackerApp() {
                     setWeekly(prev => ({ ...prev, weekNumber: currentWeekNumber }));
                     
                     setPreviousWeeks(prevWeeksData);
-                    console.debug('[WT] Final previous weeks loaded with sequential numbering', { 
-                      count: prevWeeksData.length, 
-                      currentWeekNumber: currentWeekNumber,
-                      startMonday: toISO(startMonday),
-                      weeks: prevWeeksData.map(w => ({ 
-                        weekNumber: w.weekNumber, 
-                        weekOfISO: w.weekOfISO,
-                        typesCount: w.customTypes.length,
-                        activeDays: w.days.filter(d => Object.keys(d.types || {}).length > 0).length
-                      })) 
-                    });
                   } catch (e) {
                     console.warn('[WT] Failed to load previous weeks data', e);
                     // Do not clear previousWeeks on error - avoids wiping history on transient failures
@@ -1368,7 +1304,6 @@ export default function WorkoutTrackerApp() {
               }
               if (data?.session) setSession(data.session);
             } else {
-              console.debug('[WT] No current week data found, will auto-copy from previous week');
               
               // Try to load previous week's benchmarks automatically
               const prevMonday = new Date(currentMonday);
@@ -1386,11 +1321,6 @@ export default function WorkoutTrackerApp() {
                   if (prevData?.weekly) {
                     benchmarksFromPrevWeek = prevData.weekly.benchmarks || {};
                     customTypesFromPrevWeek = prevData.weekly.customTypes || [];
-                    console.debug('[WT] Auto-copied benchmarks from previous week:', { 
-                      prevWeek: prevISO, 
-                      benchmarks: benchmarksFromPrevWeek,
-                      customTypes: customTypesFromPrevWeek
-                    });
                   }
                 }
               } catch (e) {
@@ -1402,7 +1332,6 @@ export default function WorkoutTrackerApp() {
               const snap = await getDoc(ref);
               if (snap.exists()) {
                 const data = snap.data() as PersistedState;
-                console.debug('[WT] Found legacy tracker data:', { data });
                 if (data?.weekly) {
                   // Apply same week correction logic as current week loading
                   const normalized = normalizeWeekly({ 
@@ -1417,7 +1346,6 @@ export default function WorkoutTrackerApp() {
                   const existingDates = normalized.days.map(d => d.dateISO);
                   
                   if (!arraysEqual(currentWeekDates, existingDates)) {
-                    console.debug('[WT] Legacy data days mismatch, regenerating for current week:', { expected: currentWeekDates, found: existingDates });
                     // Create new days array with current week dates, preserving existing data where possible
                     const newDays = currentWeekDates.map(dateISO => {
                       const existingDay = normalized.days.find(d => d.dateISO === dateISO);
@@ -1432,23 +1360,16 @@ export default function WorkoutTrackerApp() {
                     normalized.days = newDays;
                   }
                   
-                  console.debug('[WT] Loaded legacy tracker state (corrected)', { uid: u.uid, normalized, correctedWeekOfISO: normalized.weekOfISO });
                   setWeekly(normalized);
                 }
                 if (data?.session) setSession(data.session);
               } else {
-                console.debug('[WT] No legacy tracker data found, using defaultWeekly() with auto-copied benchmarks');
                 const defaultWk = defaultWeekly();
                 // Apply auto-copied benchmarks and types if available
                 if (Object.keys(benchmarksFromPrevWeek).length > 0 || customTypesFromPrevWeek.length > 0) {
                   defaultWk.benchmarks = benchmarksFromPrevWeek;
                   defaultWk.customTypes = customTypesFromPrevWeek;
-                  console.debug('[WT] Applied auto-copied settings to defaultWeekly:', { 
-                    benchmarks: benchmarksFromPrevWeek,
-                    customTypes: customTypesFromPrevWeek
-                  });
                 }
-                console.debug('[WT] Generated defaultWeekly:', { weekOfISO: defaultWk.weekOfISO, monday: getMonday().toDateString() });
                 setWeekly(defaultWk);
                 
                 // Save the new week with auto-copied benchmarks to Firestore
@@ -1460,7 +1381,6 @@ export default function WorkoutTrackerApp() {
                         customTypes: customTypesFromPrevWeek 
                       } 
                     }, { merge: true });
-                    console.debug('[WT] Auto-saved benchmarks for new week');
                   } catch (e) {
                     console.warn('[WT] Failed to auto-save benchmarks:', e);
                   }
@@ -1516,7 +1436,6 @@ export default function WorkoutTrackerApp() {
               const cats = data?.categories || data?.typeCategories || {};
               if (Array.isArray(t) && t.length > 0) {
                   const custom = ensureUniqueTypes(t);
-                  console.debug('[WT] Loaded global types from settings', safeString({ uid: u.uid, custom, categories: cats }));
                   // Only apply global types to weekly state if the weekly has no custom types yet
                   setWeekly((prev) => {
                     if (prev.customTypes && prev.customTypes.length > 0) return prev;
@@ -1524,7 +1443,6 @@ export default function WorkoutTrackerApp() {
                   });
               } else if (cats && Object.keys(cats).length > 0) {
                   // if only categories present, merge into weekly (never overwrite existing categories blindly)
-                  console.debug('[WT] Loaded categories from settings', safeString({ uid: u.uid, categories: cats }));
                   setWeekly((prev) => {
                     const updated = { ...prev, typeCategories: { ...(prev.typeCategories || {}), ...(cats || {}) } } as WeeklyPlan;
                     return normalizeWeekly(updated);
@@ -1541,7 +1459,6 @@ export default function WorkoutTrackerApp() {
             if (pSnap.exists()) {
               const data = pSnap.data() as any;
               if (data?.programStartDate) setProgramStartDate(data.programStartDate);
-              console.debug('[WT] Loaded program settings', { programStartDate: data?.programStartDate });
             }
           } catch (e) {
             console.warn('Failed to load program settings from Firestore', e);
@@ -1814,12 +1731,13 @@ export default function WorkoutTrackerApp() {
           </TabsList>
 
       <TabsContent value="week" className="mt-4">
-        <WeeklyTracker 
-          weekly={weekly} 
-          setWeekly={setWeekly} 
-          push={appToasts.push} 
+        <WeeklyTracker
+          weekly={weekly}
+          setWeekly={setWeekly}
+          push={appToasts.push}
           programStartDate={programStartDate}
           setProgramStartDate={setProgramStartDate}
+          previousWeeks={previousWeeks}
         />
         
         {/* Weekly Benchmark Stack - Previous weeks as collapsible benchmark charts */}
@@ -2092,12 +2010,14 @@ function WeeklyTracker({
   push,
   programStartDate,
   setProgramStartDate,
+  previousWeeks = [],
 }: {
   weekly: WeeklyPlan;
   setWeekly: (w: WeeklyPlan) => void;
   push?: (text: string, kind?: 'info'|'success'|'error') => void;
   programStartDate: string;
   setProgramStartDate: (d: string) => void;
+  previousWeeks?: WeeklyPlan[];
 }) {
   const types = weekly.customTypes;
   const [typesPanelOpen, setTypesPanelOpen] = useState(false);
@@ -2340,14 +2260,7 @@ function WeeklyTracker({
             const currentMon = getMonday();
             const currentWeekISO = toISO(currentMon);
             const currentWeekDates = weekDates(currentMon).map(d => toISO(d));
-            
-            console.debug('[WT] Reset button clicked - Monday calculation:', {
-              today: new Date().toDateString(),
-              monday: currentMon.toDateString(),
-              mondayISO: currentWeekISO,
-              weekDates: currentWeekDates
-            });
-            
+
             const newWeekly: WeeklyPlan = {
               ...weekly,
               weekOfISO: currentWeekISO,
@@ -2363,7 +2276,6 @@ function WeeklyTracker({
               })
             };
             
-            console.debug('[WT] Resetting to current week:', { old: weekly.weekOfISO, new: currentWeekISO });
             setWeekly(newWeekly);
             push?.('Reset to current week', 'success');
           }}>
@@ -2382,6 +2294,22 @@ function WeeklyTracker({
           <Button variant="outline" onClick={() => setShowProgramSettings(true)}>
             Program Settings
           </Button>
+          {previousWeeks.length > 0 && (() => {
+            const lastWeek = [...previousWeeks].sort(
+              (a, b) => new Date(b.weekOfISO).getTime() - new Date(a.weekOfISO).getTime()
+            )[0];
+            const hasBenchmarks = Object.values(lastWeek.benchmarks || {}).some(v => (v as number) > 0);
+            if (!hasBenchmarks) return null;
+            return (
+              <Button variant="outline" onClick={() => {
+                const updated = { ...weekly, benchmarks: { ...weekly.benchmarks, ...lastWeek.benchmarks } };
+                setWeekly(updated);
+                push?.('Benchmarks copied from last week', 'success');
+              }}>
+                Copy last week's goals
+              </Button>
+            );
+          })()}
           {/* Rebuild from sessions removed per user request */}
           {/* Clear/repair buttons removed from header per user request */}
         </div>
@@ -2544,20 +2472,19 @@ function WeeklyTracker({
         </div>
       )}
       <CardContent>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
           <table className="min-w-full border-separate border-spacing-0">
             <thead>
               <tr>
-                <th className="sticky left-0 bg-white text-left p-2 border-b">Type</th>
+                <th className="sticky left-0 z-10 bg-white text-left p-1 sm:p-2 border-b text-sm min-w-[80px]">Type</th>
                 {weekly.days.map((d) => (
-                  <th key={d.dateISO} className="p-2 text-xs font-medium border-b">
+                  <th key={d.dateISO} className="p-1 sm:p-2 text-xs font-medium border-b min-w-[36px] text-center">
                     {new Date(d.dateISO + 'T00:00').toLocaleDateString(undefined, { weekday: "short" })}
                     <div className="text-[10px] text-neutral-500">{new Date(d.dateISO + 'T00:00').getDate()}</div>
-                    {/* session badge removed as requested */}
                   </th>
                 ))}
-                <th className="p-2 text-left border-b">Total</th>
-                <th className="p-2 text-left border-b">Benchmark</th>
+                <th className="p-1 sm:p-2 text-left border-b text-xs sm:text-sm">Total</th>
+                <th className="p-1 sm:p-2 text-left border-b text-xs sm:text-sm">Goal</th>
               </tr>
             </thead>
             <tbody>
@@ -2565,7 +2492,7 @@ function WeeklyTracker({
                 const hit = counts[t] >= (weekly.benchmarks[t] ?? 0);
                 return (
                   <tr key={t} className="">
-                    <td className="sticky left-0 bg-white p-2 font-medium border-b">
+                    <td className="sticky left-0 z-10 bg-white p-1 sm:p-2 font-medium border-b text-sm">
                       <div className="flex items-center justify-between">
                         <span className={hit ? 'text-green-700' : ''}>{t}</span>
                         <div className="flex gap-1 opacity-60 hover:opacity-100">
@@ -2619,7 +2546,7 @@ function WeeklyTracker({
                         <td
                           key={`${d.dateISO}-${t}`}
                           className={cn(
-                            "p-2 text-center align-middle border-b cursor-pointer relative hover-parent",
+                            "p-1 sm:p-2 text-center align-middle border-b cursor-pointer relative hover-parent",
                             active && "bg-green-100/70"
                           )}
                           onClick={async () => {
@@ -2629,7 +2556,6 @@ function WeeklyTracker({
                               // Note: do NOT auto-toggle 'Cardio' when Bike is toggled to avoid double-counting.
                               // Cardio totals are computed from category mappings (Bike counts toward Cardio in the header),
                               // but we keep the checkboxes independent so the UI reflects exactly what you checked.
-                              console.debug('[WT] toggleType cell', safeString({ type: t, dateISO: days[idx].dateISO, before: day.types, after: newTypes, idx }));
                               day.types = newTypes;
 
                               // If there are no real session docs for the day, create or remove a manual session doc so DB stays authoritative
@@ -3028,7 +2954,6 @@ function WorkoutView({
 
     const today = session.dateISO;
     const todayIndex = weekly.days.findIndex((d) => d.dateISO === today);
-    console.debug('[WT] completeWorkout called', safeString({ sessionDate: today, todayIndex, sessionTypes: session.sessionTypes, weeklyDays: weekly.days.map((d) => d.dateISO) }));
 
     // Persist completed session to Firestore first so we get a document id
     try {
@@ -3047,19 +2972,16 @@ function WorkoutView({
           if (markTypes.includes('Bike') && !markTypes.includes('Cardio')) markTypes.push('Cardio');
           const newTypes = { ...updatedDays[todayIndex].types } as Record<string, boolean>;
           markTypes.forEach((t) => { newTypes[t] = true; });
-          const before = { ...updatedDays[todayIndex].types, sessions: updatedDays[todayIndex].sessions };
           // push a session record (with id) into sessionsList (authoritative list of sessions)
           const oldList = Array.isArray(updatedDays[todayIndex].sessionsList) ? updatedDays[todayIndex].sessionsList.slice() : [];
           oldList.push({ id: sessionId, sessionTypes: markTypes });
           const after = { ...newTypes, sessions: oldList.length };
-          console.debug('[WT] Updating day types and sessionsList', safeString({ dateISO: updatedDays[todayIndex].dateISO, before, after, markTypes, sessionsListBefore: updatedDays[todayIndex].sessionsList }));
           updatedDays[todayIndex] = { ...updatedDays[todayIndex], types: newTypes, sessions: after.sessions, sessionsList: oldList };
           const newWeekly = { ...weekly, days: updatedDays } as WeeklyPlan;
           setWeekly(newWeekly);
           // Persist weekly immediately so sessionsList is saved server-side
           try {
             await setDoc(doc(db, 'users', uid, 'state', newWeekly.weekOfISO), { weekly: newWeekly }, { merge: true });
-            console.debug('[WT] persisted weekly after completeWorkout', safeString({ uid, week: newWeekly.weekOfISO }));
           } catch (e) {
             console.error('[WT] failed to persist weekly after completeWorkout', e);
           }
@@ -3157,7 +3079,7 @@ function WorkoutView({
         toasts.push(`Routine "${routineName}" saved locally!`, 'success');
       } else {
         const ref = collection(db, 'users', uid, 'routines');
-        const docRef = await addDoc(ref, payload as any);
+        await addDoc(ref, payload as any);
         toasts.push(`Routine "${routineName}" saved to library!`, 'success');
       }
       
@@ -3415,6 +3337,7 @@ function ExerciseCard({
   removeSet: (id: string, setIndex: number) => void;
   onDelete: () => void;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const setOK = (rep: number) => rep >= ex.targetReps;
   const sum = ex.sets.reduce((a, b) => a + (b || 0), 0);
   const firstN = ex.sets.slice(0, ex.minSets);
@@ -3674,9 +3597,17 @@ function ExerciseCard({
           <span className={cn("flex items-center gap-1", goalMet ? "text-green-700" : "invisible")}>
             <Check className="h-4 w-4"/> goal met
           </span>
-          <Button variant="destructive" onClick={onDelete}>
-            <Trash2 className="mr-2 h-4 w-4" /> Remove
-          </Button>
+          {confirmDelete ? (
+            <>
+              <span className="text-sm text-red-600 font-medium">Remove?</span>
+              <Button variant="destructive" size="sm" onClick={onDelete}>Yes</Button>
+              <Button variant="outline" size="sm" onClick={() => setConfirmDelete(false)}>No</Button>
+            </>
+          ) : (
+            <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
+              <Trash2 className="mr-2 h-4 w-4" /> Remove
+            </Button>
+          )}
         </div>
       </CardHeader>
       <CardContent>
@@ -3878,7 +3809,7 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
         // Process ALL weekly data (current week + previous weeks)
         const allWeeklyData = [weekly, ...previousWeeks];
         
-        allWeeklyData.forEach((weekData, weekIndex) => {
+        allWeeklyData.forEach((weekData) => {
           weekData.days?.forEach((day: any) => {
             // Get all active workout types for this day
             const activeTypes = day.types ? Object.keys(day.types).filter(t => day.types[t]) : [];
@@ -4022,94 +3953,51 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
     return typeColorMap[sessionTypes[0]] || 'bg-gray-100 border-gray-300 text-gray-700';
   };
 
-  if (loading) return (
-    <div className="p-4 text-center">
-      <div>Loading history...</div>
-      <div className="text-xs text-gray-500 mt-2">
-        Querying Firestore for user: {auth.currentUser?.email}
-      </div>
-    </div>
-  );
-  
-  if (items.length === 0) return (
-    <div className="text-sm text-neutral-600 space-y-2">
-      <div>No history yet. Complete sessions will appear here.</div>
-      <div className="text-xs text-gray-400 bg-gray-50 p-2 rounded">
-        <div><strong>Debug info:</strong></div>
-        <div>User authenticated: {auth.currentUser ? 'Yes' : 'No'}</div>
-        <div>User ID: {auth.currentUser?.uid || 'None'}</div>
-        <div>User email: {auth.currentUser?.email || 'None'}</div>
-        <div>Items loaded: {items.length}</div>
-        <div>Weekly days with sessions: {weekly.days.filter(d => d.sessionsList && d.sessionsList.length > 0).length}</div>
-        <div>Firebase project: fcoworkout</div>
-        <div>Environment: {window.location.hostname}</div>
-      </div>
-      <div className="flex gap-2">
-        <button 
-          onClick={() => {
-            window.location.reload();
-          }}
-          className="px-3 py-1 bg-green-500 text-white rounded text-xs"
-        >
-          Reload History
-        </button>
-        <button 
-          onClick={() => {
-          }}
-          className="px-3 py-1 bg-gray-500 text-white rounded text-xs"
-        >
-          Log Debug Info
-        </button>
-        <button 
-          onClick={async () => {
-            try {
-              const uid = auth.currentUser?.uid;
-              if (!uid) {
-                alert('Not authenticated');
-                return;
-              }
-              const q = query(
-                collection(db, 'users', uid, 'sessions'),
-                where('completedAt', '!=', null)
-              );
-              const snapshot = await getDocs(q);
-              const sessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-              alert(`Found ${sessions.length} sessions. Check console for details.`);
-            } catch (e) {
-              console.error('Manual query error:', e);
-              alert('Error: ' + e);
-            }
-          }}
-          className="px-3 py-1 bg-blue-500 text-white rounded text-xs"
-        >
-          Test Query
-        </button>
-      </div>
-    </div>
-  );
+  if (loading) return <div className="p-4 text-center text-gray-500">Loading history...</div>;
+  if (items.length === 0) return <div className="text-sm text-neutral-600">No history yet. Complete sessions will appear here.</div>;
 
   const sortedWeeks = Object.keys(groupedSessions).sort().reverse();
 
+  const exportCSV = () => {
+    const rows: string[][] = [['Date', 'Session', 'Types', 'Exercise', 'Set', 'Reps', 'Duration (min)']];
+    items.forEach(item => {
+      const date = item.dateISO || item.completedAt?.toDate?.()?.toISOString?.()?.slice(0,10) || '';
+      const name = item.sessionName || 'Manual';
+      const types = (item.sessionTypes || []).join('; ');
+      const durationMin = item.durationSec ? Math.round(item.durationSec / 60) : '';
+      if (item.exercises && item.exercises.length > 0) {
+        item.exercises.forEach((ex: any) => {
+          (ex.sets || []).forEach((reps: number, i: number) => {
+            rows.push([date, name, types, ex.name || '', String(i + 1), String(reps), i === 0 ? String(durationMin) : '']);
+          });
+          if (!ex.sets || ex.sets.length === 0) {
+            rows.push([date, name, types, ex.name || '', '', '', String(durationMin)]);
+          }
+        });
+      } else {
+        rows.push([date, name, types, '', '', '', String(durationMin)]);
+      }
+    });
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `workout-history-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-4">
-      {loading && (
-        <div className="p-4 text-center">
-          <div>Loading history...</div>
-          <div className="text-xs text-gray-500 mt-2">
-            Querying Firestore for user: {auth.currentUser?.email}
-          </div>
-        </div>
-      )}
-
-      {!loading && items.length === 0 && (
-        <div className="text-sm text-neutral-600 space-y-2">
-          <div>No history yet. Complete sessions will appear here.</div>
-        </div>
-      )}
-
-      {!loading && sortedWeeks.length > 0 && (
+      {sortedWeeks.length > 0 && (
         <div>
-          <h3 className="text-lg font-semibold mb-4">Session History ({items.length} sessions)</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Session History ({items.length} sessions)</h3>
+            <Button variant="outline" size="sm" onClick={exportCSV}>
+              Export CSV
+            </Button>
+          </div>
           {sortedWeeks.map((weekKey) => {
         const weekData = groupedSessions[weekKey];
         // Parse ISO date properly to avoid timezone issues
