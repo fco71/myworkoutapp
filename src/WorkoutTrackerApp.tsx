@@ -2649,11 +2649,9 @@ function WeeklyTracker({
                           }}
                         />
                         <span className="text-[10px] text-neutral-500">{(weekly.benchmarks[t] ?? 0) === 1 ? 'day' : 'days'}</span>
-                        {hit && (
-                          <span className="text-green-700 text-xs flex items-center gap-1">
-                            <Check className="h-4 w-4" /> goal met
-                          </span>
-                        )}
+                        <span className={cn("text-xs flex items-center gap-1", hit ? "text-green-700" : "invisible")}>
+                          <Check className="h-4 w-4" /> goal met
+                        </span>
                       </div>
                     </td>
                   </tr>
@@ -3630,9 +3628,9 @@ function ExerciseCard({
         </div>
         <div className="flex items-center gap-3 text-sm">
           <div className="font-medium">Total: {sum} / {totalTarget}</div>
-          {goalMet && (
-            <span className="text-green-700 flex items-center gap-1"><Check className="h-4 w-4"/> goal met</span>
-          )}
+          <span className={cn("flex items-center gap-1", goalMet ? "text-green-700" : "invisible")}>
+            <Check className="h-4 w-4"/> goal met
+          </span>
           <Button variant="destructive" onClick={onDelete}>
             <Trash2 className="mr-2 h-4 w-4" /> Remove
           </Button>
