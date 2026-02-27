@@ -35,3 +35,47 @@ export interface Routine {
 }
 
 export type WeeklyGoals = Record<WorkoutType, number>;
+
+// --- App-specific types ---
+
+export type ResistanceExercise = {
+  id: string;
+  name: string;
+  minSets: number;
+  targetReps: number;
+  intensity: number;
+  sets: number[];
+  notes: string;
+};
+
+export type ResistanceSession = {
+  id?: string;
+  dateISO: string;
+  sessionName: string;
+  exercises: ResistanceExercise[];
+  completed: boolean;
+  sessionTypes: string[];
+  durationSec: number;
+  completedAt?: number;
+  ts?: number;
+  sourceTemplateId?: string;
+};
+
+export type WeeklyDay = {
+  dateISO: string;
+  types: Record<string, boolean>;
+  sessions: number;
+  sessionsList: any[];
+  comments: Record<string, string>;
+};
+
+export type WeeklyPlan = {
+  weekOfISO: string;
+  weekNumber: number;
+  days: WeeklyDay[];
+  benchmarks: Record<string, number>;
+  customTypes: string[];
+  typeCategories: Record<string, string>;
+};
+
+export type PersistedState = { weekly: WeeklyPlan; session: ResistanceSession };
