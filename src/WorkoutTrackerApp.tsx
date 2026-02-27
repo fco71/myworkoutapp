@@ -247,7 +247,6 @@ function initializeAudio() {
   const ctx = getAudioContext();
   if (ctx && ctx.state === 'suspended') {
     ctx.resume().then(() => {
-      console.log('Audio context resumed successfully');
       audioInitialized = true;
     }).catch((e) => {
       console.warn('Failed to resume audio context:', e);
@@ -258,16 +257,13 @@ function initializeAudio() {
 }
 
 async function playBeep() {
-  console.log('Timer finished - attempting to play alarm sound');
   try {
     const ctx = getAudioContext();
     if (!ctx) throw new Error('No audio context available');
     
     // Resume context if suspended (required by modern browsers)
     if (ctx.state === 'suspended') {
-      console.log('Audio context suspended, attempting to resume...');
       await ctx.resume();
-      console.log('Audio context resumed');
     }
     
     // Create four beeps with consistent system volume
@@ -302,12 +298,10 @@ async function playBeep() {
       }, delay);
     });
     
-    console.log('Timer beep played successfully');
   } catch (e) {
     console.warn('WebAudio failed, trying HTML5 Audio fallback:', e);
     // Enhanced fallback: try HTML5 Audio with multiple beeps
     try { 
-      console.log('Attempting HTML5 Audio fallback...');
       const audioURL = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmkiBUAAfwA=';
       
       // Play multiple beeps to match WebAudio version
@@ -317,14 +311,12 @@ async function playBeep() {
           const audio = new Audio(audioURL);
           // Use system volume - no artificial volume reduction
           audio.play().then(() => {
-            console.log(`HTML5 Audio beep ${delay}ms played successfully`);
           }).catch((err) => {
             console.warn(`HTML5 Audio beep ${delay}ms failed:`, err);
           });
         }, delay);
       });
       
-      console.log('HTML5 Audio fallback initiated');
     } catch (fallbackError) {
       console.warn('HTML5 Audio fallback also failed:', fallbackError);
       // Visual fallback when all audio fails
@@ -422,7 +414,6 @@ function playWorkoutCompletionSound() {
       }, delays[index]);
     });
     
-    console.log('Workout completion melody played successfully');
   } catch (e) {
     console.warn('WebAudio failed for completion sound, trying fallback:', e);
     // Fallback: use the same beep as timer but shorter
@@ -430,12 +421,9 @@ function playWorkoutCompletionSound() {
       const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmkiBUAAfwA=');
       // Use system volume instead of setting audio.volume
       audio.play().then(() => {
-        console.log('Completion fallback audio played successfully');
       }).catch(() => {
-        console.log('Audio fallback failed for completion sound');
       });
     } catch (_) {
-      console.log('All audio methods failed for completion sound');
     }
     
     // Show congratulatory notification
@@ -490,29 +478,11 @@ function saveLocalRoutine(item: any) {
 // no local exercises -- exercises are a database feature (persisted in Firestore)
 
 // --- Weekly Overview Component ---
-function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
+function WeeklyOverview({ weekly, previousWeeks = [] }: { weekly: WeeklyPlan; previousWeeks?: WeeklyPlan[] }) {
   // normalize today's ISO (yyyy-mm-dd) using local date
   const today = toISO(new Date());
 
-  // New behavior: counts are simple checkbox counts only (the user requested
-  // the header counters to reflect clicks). We ignore sessionsList/sessions
-  // for these counters entirely.
-  const counts = useMemo(() => {
-    const c: Record<string, number> = {};
-    weekly.customTypes.forEach((t) => (c[t] = 0));
-    weekly.days.forEach((d) => {
-      Object.keys(d.types || {}).forEach((t) => {
-        if (d.types[t]) {
-          if (!(t in c)) c[t] = 0;
-          c[t] += 1;
-        }
-      });
-    });
-    console.debug('[WT] WeeklyOverview counts computed', safeString({ counts: c, days: weekly.days.map(d => ({ dateISO: d.dateISO, types: d.types, sessions: d.sessions, sessionsList: d.sessionsList })) }));
-    return c;
-  }, [weekly.days, weekly.customTypes]);
-
-  // New simple counters based purely on checkbox clicks (no sessionsList/sessions):
+  // Counters based purely on checkbox clicks (no sessionsList/sessions):
   // Defensive: compute from a cleaned snapshot so we do strict boolean counting
   const cleanedDays = weekly.days.map(d => {
     const types: Record<string, boolean> = {};
@@ -549,18 +519,22 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
   const hasCardioCategory = Object.values(typeCats).some((v) => v === 'Cardio');
   const hasMindfulnessCategory = Object.values(typeCats).some((v) => v === 'Mindfulness');
 
-  // debug: compute unique session ids across the week and show per-day details
-    try {
-    const allIds: string[] = [];
-    weekly.days.forEach((d) => {
-      (d.sessionsList || []).forEach((s: any) => { if (s?.id) allIds.push(String(s.id)); else allIds.push(JSON.stringify(s.sessionTypes || s)); });
-    });
-  const uniqueIds = Array.from(new Set(allIds));
-  const perDay = weekly.days.map(d => ({ dateISO: d.dateISO, sessionsList: (d.sessionsList || []).map((s:any)=> ({ id: s?.id, sessionTypes: s.sessionTypes })) , sessions: d.sessions }));
-  console.debug('[WT] Week summary', safeString({ weekOfISO: weekly.weekOfISO, weekClicks: weekly.days.reduce((acc,d)=>acc+Object.values(d.types||{}).filter(Boolean).length,0), uniqueSessionCount: uniqueIds.length, uniqueIds, perDay, counts }));
-  } catch (e) {
-    console.warn('[WT] Week summary debug failed', safeString(e));
-  }
+  // Streak: consecutive weeks (ending at most recent active week) with at least one workout
+  const streak = useMemo(() => {
+    const weekActivity = (w: WeeklyPlan) =>
+      w.days.reduce((acc, d) => acc + Object.keys(d.types || {}).filter(k => d.types[k]).length, 0);
+    const allWeeks = [weekly, ...previousWeeks].sort(
+      (a, b) => new Date(b.weekOfISO).getTime() - new Date(a.weekOfISO).getTime()
+    );
+    // If current week has no activity yet, start counting from last week
+    const startIdx = weekActivity(allWeeks[0]) === 0 ? 1 : 0;
+    let count = 0;
+    for (let i = startIdx; i < allWeeks.length; i++) {
+      if (weekActivity(allWeeks[i]) > 0) count++;
+      else break;
+    }
+    return count;
+  }, [weekly, previousWeeks]);
 
   return (
     <div className="space-y-4 mb-8">
@@ -571,7 +545,7 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
         </div>
       </div>
       
-  <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {/* Today's Progress */}
         <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
           <CardContent className="p-6">
@@ -603,6 +577,24 @@ function WeeklyOverview({ weekly }: { weekly: WeeklyPlan }) {
           </div>
         </CardContent>
       </Card>
+
+  {/* Streak */}
+      {streak > 0 && (
+        <Card className="bg-gradient-to-br from-amber-500 to-amber-600 text-white border-0 shadow-lg">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-amber-100 text-sm font-medium">Streak</p>
+                <p className="text-3xl font-bold">{streak}</p>
+                <p className="text-amber-200 text-xs">{streak === 1 ? 'week' : 'weeks'}</p>
+              </div>
+              <div className="w-12 h-12 bg-amber-400 rounded-full flex items-center justify-center">
+                <span className="text-2xl">🔥</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
   {/* Resistance Progress */}
       {hasResistanceCategory && (
@@ -675,7 +667,6 @@ function WeeklyBenchmarkStack({
   const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set());
   const [visibleCount, setVisibleCount] = useState(24); // Show 24 weeks at a time
   
-  console.log('[WeeklyBenchmarkStack] Rendering with previousWeeks:', previousWeeks.length, previousWeeks);
   
   const toggleWeek = (weekNumber: number) => {
     const newExpanded = new Set(expandedWeeks);
@@ -722,6 +713,23 @@ function WeeklyBenchmarkStack({
     );
   }
 
+  // Progress chart: last 16 weeks, oldest → newest (left → right)
+  const chartWeeks = [...previousWeeks]
+    .sort((a, b) => new Date(a.weekOfISO).getTime() - new Date(b.weekOfISO).getTime())
+    .slice(-16);
+  const chartData = chartWeeks.map(w => ({
+    weekNum: w.weekNumber,
+    done: w.days.reduce((acc, d) => acc + Object.keys(d.types || {}).filter(k => d.types[k]).length, 0),
+  }));
+  const maxVal = Math.max(...chartData.map(d => d.done), 1);
+  const barW = 16;
+  const barGap = 4;
+  const chartTopPad = 10;
+  const labelH = 14;
+  const barAreaH = 72;
+  const svgH = chartTopPad + barAreaH + labelH;
+  const svgW = chartData.length * (barW + barGap) - barGap;
+
   return (
     <div className="space-y-4 mt-8">
       <div className="flex items-center justify-between mb-6">
@@ -730,6 +738,49 @@ function WeeklyBenchmarkStack({
           {previousWeeks.length} weeks
         </span>
       </div>
+
+      {chartData.length >= 2 && (
+        <Card className="border border-gray-200 mb-6">
+          <CardContent className="p-4">
+            <p className="text-xs font-medium text-gray-500 mb-3">Weekly activity (workouts logged)</p>
+            <div className="overflow-x-auto">
+              <svg
+                viewBox={`0 0 ${svgW} ${svgH}`}
+                style={{ width: '100%', minWidth: chartData.length * 20, height: 100 }}
+                preserveAspectRatio="xMinYMid meet"
+              >
+                {/* Max value guideline */}
+                <line
+                  x1={0} y1={chartTopPad} x2={svgW} y2={chartTopPad}
+                  stroke="#e5e7eb" strokeWidth={0.5} strokeDasharray="2,2"
+                />
+                <text x={svgW} y={chartTopPad - 2} textAnchor="end" fontSize={6} fill="#d1d5db">{maxVal}</text>
+                {chartData.map((d, i) => {
+                  const barH = Math.max(d.done > 0 ? (d.done / maxVal) * barAreaH : 0, d.done > 0 ? 3 : 0);
+                  const x = i * (barW + barGap);
+                  const y = chartTopPad + barAreaH - barH;
+                  const intensity = d.done / maxVal;
+                  const r = Math.round(59 + (99 - 59) * (1 - intensity));
+                  const g = Math.round(130 + (102 - 130) * (1 - intensity));
+                  const b = Math.round(246 + (241 - 246) * (1 - intensity));
+                  const fill = d.done > 0 ? `rgb(${r},${g},${b})` : '#f3f4f6';
+                  return (
+                    <g key={i}>
+                      <rect x={x} y={y} width={barW} height={barH} rx={2} fill={fill} />
+                      <text
+                        x={x + barW / 2} y={svgH - 1}
+                        textAnchor="middle" fontSize={6} fill="#9ca3af"
+                      >
+                        {d.weekNum}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {visibleWeeks.map((week, index) => {
         const isExpanded = expandedWeeks.has(week.weekNumber || index);
@@ -817,7 +868,6 @@ function PreviousWeekTracker({
   const today = toISO(new Date());
   
   const toggleWorkout = (dayIndex: number, type: string) => {
-    console.log(`🔄 [${new Date().toISOString()}] Toggle workout - Day ${dayIndex}, Type: ${type}`);
     
     const updatedWeekly = { ...weekly };
     updatedWeekly.days = [...weekly.days];
@@ -825,7 +875,6 @@ function PreviousWeekTracker({
     
     // Toggle the workout type
     const currentValue = updatedWeekly.days[dayIndex].types?.[type] || false;
-    console.log(`Current value for ${type}: ${currentValue} -> ${!currentValue}`);
     
     updatedWeekly.days[dayIndex].types = {
       ...updatedWeekly.days[dayIndex].types,
@@ -842,8 +891,6 @@ function PreviousWeekTracker({
       sessionTypes: completedTypes
     }] : [];
     
-    console.log(`📊 Updated day ${dayIndex}:`, updatedWeekly.days[dayIndex]);
-    console.log(`🚀 Calling onUpdateWeek...`);
     onUpdateWeek(updatedWeekly);
   };
   
@@ -985,7 +1032,6 @@ export default function WorkoutTrackerApp() {
     // Request notification permission for timer alarms
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().then(permission => {
-        console.log('Notification permission:', permission);
       });
     }
   }, []);
@@ -1707,7 +1753,7 @@ export default function WorkoutTrackerApp() {
           </div>
           
           {/* Weekly Overview Dashboard */}
-          <WeeklyOverview weekly={weekly} />
+          <WeeklyOverview weekly={weekly} previousWeeks={previousWeeks} />
         </header>
 
         <Tabs defaultValue="week" className="">
@@ -1732,8 +1778,6 @@ export default function WorkoutTrackerApp() {
           previousWeeks={previousWeeks} 
           onUpdateWeek={async (week) => {
             try {
-              console.log('📝 onUpdateWeek called with:', week);
-              console.log('💾 Saving edited week:', week.weekOfISO);
               
               if (!userId) {
                 console.error('❌ No user ID available');
@@ -1748,12 +1792,10 @@ export default function WorkoutTrackerApp() {
               const weekRef = doc(db, 'users', userId, 'state', week.weekOfISO);
               await setDoc(weekRef, { weekly: cleanWeek });
               
-              console.log('✅ Week saved successfully to Firebase');
               
               // Update local state to reflect changes
               setPreviousWeeks(prev => {
                 const updated = prev.map(w => w.weekOfISO === week.weekOfISO ? week : w);
-                console.log('🔄 Updated previousWeeks state');
                 return updated;
               });
               
@@ -2037,7 +2079,6 @@ function WeeklyTracker({
   }, [weekly.days, types]);
 
   const monday = new Date(weekly.weekOfISO + 'T00:00:00'); // Add time to avoid timezone issues
-  console.log('WeeklyTracker: weekOfISO:', weekly.weekOfISO, 'monday:', monday.toDateString());
   const [newTypeName, setNewTypeName] = useState("");
   const [newTypeCategory, setNewTypeCategory] = useState<string>("None");
 
@@ -2947,7 +2988,6 @@ function WorkoutView({
         console.warn('[WT] completeWorkout: no user id, cannot persist session');
       } else {
         const payload = { ...session, completed: true, durationSec: timerSec, completedAt: Date.now() };
-        console.log('HistoryView: Saving completed session:', payload);
         const docRef = await addDoc(collection(db, 'users', uid, 'sessions'), payload as any);
         const sessionId = docRef.id;
 
@@ -3020,7 +3060,6 @@ function WorkoutView({
 
   // Show save dialog - first step  
   const saveRoutine = async () => {
-    console.log('[SaveRoutine] Checking if routine can be saved...');
     
     // Validation checks
     if (!session.exercises || session.exercises.length === 0) {
@@ -3043,17 +3082,9 @@ function WorkoutView({
     }
 
     setIsSaving(true);
-    console.log('[SaveRoutine] Starting save routine process...');
-    console.log('[SaveRoutine] Session data:', {
-      routineName: routineName,
-      exercisesCount: session.exercises.length,
-      exercises: session.exercises.map(e => ({ name: e.name, minSets: e.minSets, targetReps: e.targetReps })),
-      sessionTypes: session.sessionTypes
-    });
     
     try {
       const uid = auth.currentUser?.uid;
-      console.log('[SaveRoutine] User ID:', uid);
       
       const payload = {
         id: crypto.randomUUID(),
@@ -3071,17 +3102,13 @@ function WorkoutView({
         ownerName: userName || 'User'
       };
       
-      console.log('[SaveRoutine] Payload to save:', payload);
       
       if (!uid) {
-        console.log('[SaveRoutine] User not signed in, saving locally');
         saveLocalRoutine(payload);
         toasts.push(`Routine "${routineName}" saved locally!`, 'success');
       } else {
-        console.log('[SaveRoutine] Saving to Firestore...');
         const ref = collection(db, 'users', uid, 'routines');
         const docRef = await addDoc(ref, payload as any);
-        console.log('[SaveRoutine] Saved successfully with ID:', docRef.id);
         toasts.push(`Routine "${routineName}" saved to library!`, 'success');
       }
       
@@ -3215,7 +3242,6 @@ function WorkoutView({
         <Button 
           variant="secondary" 
           onClick={() => {
-            console.log('[CLICK] Save Routine button clicked!');
             saveRoutine();
           }}
           disabled={isSaving}
@@ -3365,38 +3391,29 @@ function ExerciseCard({
         exerciseName.length >= 2; // Minimum length check
       
       if (!isValidExerciseName || historyLoading) {
-        console.log('Skipping history load for invalid exercise name:', exerciseName);
         setExerciseHistory({});
         return;
       }
       
-      console.log('Loading history for exercise:', exerciseName);
-      console.log('🔍 Debug: Exercise name validation passed for:', exerciseName);
       setHistoryLoading(true);
       try {
         const uid = auth.currentUser?.uid;
         if (!uid) {
-          console.log('❌ No user authenticated');
           return;
         }
         
-        console.log('✅ User authenticated, uid:', uid);
         
         // Query sessions that contain this exercise
         const sessionsRef = collection(db, 'users', uid, 'sessions');
         const snaps = await getDocs(sessionsRef);
-        console.log('Found', snaps.docs.length, 'total sessions');
         
         // Debug: Log all sessions
-        console.log('Found', snaps.docs.length, 'total sessions for exercise:', ex.name);
         const sessionsWithExercises = snaps.docs.filter(doc => {
           const data = doc.data();
           return data.exercises && data.exercises.length > 0;
         });
-        console.log('Sessions with exercises:', sessionsWithExercises.length);
         
         if (sessionsWithExercises.length > 0) {
-          console.log('📋 All available exercise names in database:');
           const allExerciseNames = new Set();
           sessionsWithExercises.forEach(doc => {
             const data = doc.data();
@@ -3405,17 +3422,12 @@ function ExerciseCard({
               allExerciseNames.add(cleanName);
             });
           });
-          console.log([...allExerciseNames].sort());
-          console.log('🎯 Searching for:', exerciseName);
           
           // Special debugging for specific exercises
           if (exerciseName.toLowerCase().includes('bodyweight') || exerciseName.toLowerCase().includes('ring')) {
-            console.log('🚨 SPECIAL DEBUG for', exerciseName);
-            console.log('Available names that might match:');
             Array.from(allExerciseNames).forEach((name) => {
               const nameStr = String(name);
               if (nameStr.toLowerCase().includes('bodyweight') || nameStr.toLowerCase().includes('ring') || nameStr.toLowerCase().includes('row') || nameStr.toLowerCase().includes('rollout')) {
-                console.log('  - "' + nameStr + '"');
               }
             });
           }
@@ -3433,12 +3445,10 @@ function ExerciseCard({
               
               // Debug logging for specific exercises
               if (exerciseName.toLowerCase().includes('bodyweight') || exerciseName.toLowerCase().includes('ring')) {
-                console.log(`🔍 Comparing stored: "${cleanStoredName}" with search: "${cleanSearchName}"`);
               }
               
               // Exact match
               if (cleanStoredName === cleanSearchName) {
-                console.log(`✅ Exact match found: "${cleanStoredName}" === "${cleanSearchName}"`);
                 return true;
               }
               
@@ -3459,20 +3469,16 @@ function ExerciseCard({
               );
               
               if (fuzzyMatch && (exerciseName.toLowerCase().includes('bodyweight') || exerciseName.toLowerCase().includes('ring'))) {
-                console.log(`✅ Fuzzy match found: "${cleanStoredName}" ~= "${cleanSearchName}"`);
               }
               
               return fuzzyMatch;
             });
-            console.log('Session', session.id, 'completed:', hasCompletedAt, 'has matching exercise for "' + ex.name + '":', hasMatchingExercise);
             if (session.exercises) {
-              console.log('  Exercise names in session:', session.exercises.map((e: any) => '"' + e.name + '"'));
             }
             return hasCompletedAt && hasMatchingExercise;
           })
           .sort((a: any, b: any) => (b.completedAt || 0) - (a.completedAt || 0));
 
-        console.log('Found', matchingSessions.length, 'matching completed sessions');
 
         if (matchingSessions.length > 0) {
           // Get the exercise data from matching sessions
@@ -3508,7 +3514,6 @@ function ExerciseCard({
             };
           }).filter(Boolean);
 
-          console.log('Exercise instances found:', exerciseInstances);
 
           // Find last workout (most recent completed)
           const lastWorkout = exerciseInstances[0];
@@ -3536,11 +3541,9 @@ function ExerciseCard({
             recentWorkouts
           };
           
-          console.log('Setting exercise history:', historyData);
           setExerciseHistory(historyData);
         } else {
           // Clear history if no completed sessions found
-          console.log('No completed sessions found, clearing history');
           setExerciseHistory({});
         }
       } catch (error) {
@@ -3571,15 +3574,6 @@ function ExerciseCard({
   const hasHistory = lastWorkout || personalRecord || (recentWorkouts && recentWorkouts.length > 0);
 
   // Debug: Log exercise data
-  console.log('🏋️ ExerciseCard render:', {
-    id: ex.id,
-    name: `"${ex.name}"`,
-    nameLength: ex.name?.length || 0,
-    minSets: ex.minSets,
-    targetReps: ex.targetReps,
-    intensity: ex.intensity,
-    sets: ex.sets
-  });
 
   return (
     <Card className={cn(
@@ -3820,7 +3814,6 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
   const [showAllHistoryDays, setShowAllHistoryDays] = useState<Record<string, boolean>>({});
 
   // Log component mount
-  console.log('HistoryView: Component mounted, auth state:', !!auth.currentUser, 'weekly days:', weekly.days.length);
 
   useEffect(() => {
     let mounted = true;
@@ -3829,25 +3822,19 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
       try {
         setLoading(true);
         const uid = auth.currentUser?.uid;
-        console.log('HistoryView: Loading sessions for user:', uid);
         
         // ALWAYS process weekly tracker data first (works even without authentication)
         let displaySessions: any[] = [];
         
         // Process ALL weekly data (current week + previous weeks)
-        console.log('[HistoryView] Processing weekly data - Current week:', weekly.weekOfISO, 'Previous weeks:', previousWeeks.length);
-        console.log('[HistoryView] Weekly days:', weekly.days?.length, 'days');
         const allWeeklyData = [weekly, ...previousWeeks];
-        console.log('[HistoryView] Total weeks to process:', allWeeklyData.length);
         
         allWeeklyData.forEach((weekData, weekIndex) => {
-          console.log(`[HistoryView] Week ${weekIndex} (${weekData.weekOfISO}): ${weekData.days?.length || 0} days`);
           weekData.days?.forEach((day: any) => {
             // Get all active workout types for this day
             const activeTypes = day.types ? Object.keys(day.types).filter(t => day.types[t]) : [];
             
             if (activeTypes.length > 0) {
-              console.log(`[HistoryView] Day ${day.dateISO} has active types:`, activeTypes);
             }
             
             if (activeTypes.length > 0) {
@@ -3863,13 +3850,11 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
                 completedAt: new Date(day.dateISO + 'T12:00:00'),
                 source: 'weekly_tracker_types'
               };
-              console.log(`[HistoryView] Created session for ${day.dateISO}:`, sessionData.sessionName);
               displaySessions.push(sessionData);
             }
           });
         });
 
-        console.log(`[HistoryView] Total sessions from weekly tracker: ${displaySessions.length}`);
         
         // If authenticated, also load Firestore sessions
         if (uid) {
@@ -3880,18 +3865,15 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
               orderBy('completedAt', 'desc')
             );
             
-            console.log('HistoryView: Executing Firestore query...');
             const snapshot = await getDocs(q);
             const sessions = snapshot.docs.map(doc => ({
               id: doc.id,
               ...doc.data()
             }));
 
-            console.log('HistoryView: Found Firestore sessions:', sessions.length);
             
             // Add Firestore sessions, but only if they don't conflict with weekly tracker data
             const weeklyTrackerDates = displaySessions.map(s => s.dateISO);
-            console.log(`[HistoryView] Weekly tracker covers dates:`, weeklyTrackerDates);
             
             sessions.forEach((fs: any) => {
               const fsDate = fs.dateISO || (fs.completedAt?.toDate ? fs.completedAt.toDate().toISOString().split('T')[0] : null);
@@ -3905,14 +3887,8 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
             console.warn('HistoryView: Failed to load Firestore sessions:', error);
           }
         } else {
-          console.log('HistoryView: No authenticated user, skipping Firestore query');
         }
 
-        console.log(`[HistoryView] About to set items. displaySessions has ${displaySessions.length} sessions`);
-        console.log(`[HistoryView] Sessions breakdown:`, {
-          weeklyTracker: displaySessions.filter(s => s.source === 'weekly_tracker_types').length,
-          firestore: displaySessions.filter(s => s.source === 'firestore').length
-        });
         
         if (mounted) {
           setItems(displaySessions);
@@ -4030,8 +4006,6 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
         </button>
         <button 
           onClick={() => {
-            console.log('Current auth state:', auth.currentUser);
-            console.log('Weekly data:', weekly);
           }}
           className="px-3 py-1 bg-gray-500 text-white rounded text-xs"
         >
@@ -4045,14 +4019,12 @@ function HistoryView({ weekly, setWeekly, setSession, previousWeeks }: { weekly:
                 alert('Not authenticated');
                 return;
               }
-              console.log('Manual query for user:', uid);
               const q = query(
                 collection(db, 'users', uid, 'sessions'),
                 where('completedAt', '!=', null)
               );
               const snapshot = await getDocs(q);
               const sessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-              console.log('Manual query result:', sessions);
               alert(`Found ${sessions.length} sessions. Check console for details.`);
             } catch (e) {
               console.error('Manual query error:', e);
@@ -4361,10 +4333,8 @@ function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onL
     try {
       const uid = auth.currentUser?.uid;
       const currentFilter = useFilter || filter;
-      console.log('[Library] Loading list, uid:', uid, 'filter:', currentFilter);
       if (!uid) {
         // Not signed in: load public content based on filter type
-        console.log('[Library] Not signed in, loading public content for filter:', currentFilter);
         let data: any[] = [];
         
         if (currentFilter === 'exercise') {
@@ -4425,7 +4395,6 @@ function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onL
             const pubRt = publicRtSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
             data = [...data, ...pubRt];
             
-            console.log('Unsigned user loaded', pubEx.length, 'public exercises and', pubRt.length, 'public routines');
           } catch (e) {
             console.error('Failed to load public content for unsigned user - INDEX ERROR:', e);
           }
@@ -4434,8 +4403,6 @@ function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onL
         // Apply favorites filter (will be empty for unsigned users)
         data = data.map(it => ({ ...it, favorite: false }));
         
-        console.log('[Library] Final setItems call with', data.length, 'items');
-        console.log('[DEBUG] Filter:', filter, 'Data sample:', data.slice(0, 3).map(d => ({ name: d.name, kind: d.kind, exercises: d.exercises?.length })));
         const sortedData = data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         setItems(sortedData);
         setLoading(false);
@@ -4518,16 +4485,13 @@ function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onL
         
       } else if (filter === 'user') {
         // Load only user's own content
-        console.log('[DEBUG] Loading user content for uid:', uid);
         const refEx = collection(db, 'users', uid, 'exercises');
         const snapsEx = await getDocs(refEx);
         const exercises = snapsEx.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: uid, kind: 'exercise' }));
-        console.log('[DEBUG] User exercises found:', exercises.length, exercises.map(e => e.name));
         
         const refRt = collection(db, 'users', uid, 'routines');
         const snapsRt = await getDocs(refRt);
         const routines = snapsRt.docs.map((d) => ({ id: d.id, ...(d.data() as any), owner: uid, kind: 'routine' }));
-        console.log('[DEBUG] User routines found:', routines.length, routines.map(r => r.name));
         
         data = [...exercises, ...routines];
         
@@ -4553,7 +4517,6 @@ function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onL
           const publicRtSnaps = await getDocs(cgRt);
           const pubRt = publicRtSnaps.docs.map(d => ({ id: d.id, ...(d.data() as any), owner: d.ref.parent.parent?.id || 'unknown', kind: 'routine' }));
           for (const p of pubRt) if (p.owner !== uid) data.push(p);
-          console.log('Successfully loaded', pubEx.length, 'public exercises and', pubRt.length, 'public routines');
         } catch (e) {
           console.error('Failed to load public content - this is the index error:', e);
         }
@@ -4565,17 +4528,12 @@ function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onL
       // For favorites filter, filter by favorited items
       if (currentFilter === 'favorites') {
         const currentFavs = (window as any).__app_favorites_cache?.map || new Set();
-        console.log('[DEBUG] Favorites filter - current cache:', Array.from(currentFavs));
-        console.log('[DEBUG] Favorites filter - data before filter:', data.map(d => ({name: d.name, id: d.id, kind: d.kind})));
         data = data.filter(it => {
           const key = `${it.kind||'routine'}::${it.id}`;
           const isFav = currentFavs.has(key);
-          if (isFav) console.log('[DEBUG] Found favorite:', key, it.name);
           return isFav;
         });
-        console.log('[DEBUG] Favorites filter - data after filter:', data.map(d => ({name: d.name, id: d.id, kind: d.kind})));
       }
-      console.log('[Library] Final setItems call with', data.length, 'items');
       const sortedData = data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       setItems(sortedData);
     } catch (e) {
@@ -4605,15 +4563,12 @@ function LibraryView({ userName, onLoadRoutine }: { userName: string | null; onL
         const onSnap = (await import('firebase/firestore')).onSnapshot as any;
         return onSnap(col, (snap: any) => {
           try {
-            console.log('[DEBUG] Favorites listener triggered, found', snap.docs.length, 'favorites documents');
             const favSet = new Set<string>();
             snap.docs.forEach((d: any) => {
               const data = d.data();
               const favKey = `${data.itemType||'routine'}::${data.itemId}`;
-              console.log('[DEBUG] Found favorite document:', d.id, 'data:', data, 'key:', favKey);
               favSet.add(favKey);
             });
-            console.log('[DEBUG] Final favorites set:', Array.from(favSet));
             
             // Only update cache and items if something actually changed
             const currentCache = (window as any).__app_favorites_cache?.map;
