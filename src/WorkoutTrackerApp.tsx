@@ -866,7 +866,27 @@ function PreviousWeekTracker({
 }) {
   const types = weekly.customTypes;
   const today = toISO(new Date());
-  
+
+  const [commentModal, setCommentModal] = useState<{ type: string; dayIndex: number; comment: string } | null>(null);
+
+  const openCommentModal = (type: string, dayIndex: number) => {
+    setCommentModal({ type, dayIndex, comment: weekly.days[dayIndex]?.comments?.[type] || '' });
+  };
+
+  const saveComment = () => {
+    if (!commentModal) return;
+    const { type, dayIndex, comment } = commentModal;
+    const updatedWeekly = { ...weekly, days: [...weekly.days] };
+    const day = { ...updatedWeekly.days[dayIndex] };
+    const comments = { ...(day.comments || {}) };
+    if (comment.trim()) comments[type] = comment.trim();
+    else delete comments[type];
+    day.comments = comments;
+    updatedWeekly.days[dayIndex] = day;
+    onUpdateWeek(updatedWeekly);
+    setCommentModal(null);
+  };
+
   const toggleWorkout = (dayIndex: number, type: string) => {
     
     const updatedWeekly = { ...weekly };
@@ -956,10 +976,17 @@ function PreviousWeekTracker({
                           {isChecked && <Check className="w-4 h-4" />}
                         </button>
                         
-                        {/* Comment indicator */}
-                        {hasComment && (
-                          <div className="w-2 h-2 bg-blue-500 rounded-full" title={day.comments?.[type]}></div>
-                        )}
+                        {/* Comment button */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); openCommentModal(type, dayIndex); }}
+                          title={hasComment ? `Comment: ${day.comments?.[type]}` : 'Add comment'}
+                          className={cn(
+                            "h-4 w-4 flex items-center justify-center rounded transition-opacity",
+                            hasComment ? "opacity-100 text-blue-500" : "opacity-20 hover:opacity-70 text-gray-400"
+                          )}
+                        >
+                          <MessageSquare className="w-3 h-3" />
+                        </button>
                       </div>
                     </td>
                   );
@@ -969,6 +996,28 @@ function PreviousWeekTracker({
           </tbody>
         </table>
       </div>
+
+      {/* Comment modal */}
+      {commentModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setCommentModal(null)}>
+          <div className="bg-white rounded-lg p-6 w-96 shadow-xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-3">
+              {commentModal.type} — {weekly.days[commentModal.dayIndex]?.dateISO}
+            </h3>
+            <textarea
+              className="w-full border rounded p-2 text-sm resize-none h-24 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              placeholder="Add a note..."
+              value={commentModal.comment}
+              onChange={e => setCommentModal({ ...commentModal, comment: e.target.value })}
+              autoFocus
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <Button variant="ghost" onClick={() => setCommentModal(null)}>Cancel</Button>
+              <Button onClick={saveComment}>Save</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Week Summary */}
       <div className="bg-gray-100 p-4 rounded-lg">
@@ -2650,9 +2699,9 @@ function WeeklyTracker({
                               variant="ghost"
                               className={cn(
                                 "h-5 w-5 p-0 absolute top-0 right-0 m-0.5 transition-opacity",
-                                "opacity-0 hover:!opacity-100",
+                                "opacity-20 hover:!opacity-100",
                                 "[.hover-parent:hover_&]:opacity-60",
-                                d.comments?.[t] && "!opacity-60 text-blue-600 bg-blue-50"
+                                d.comments?.[t] && "!opacity-100 text-blue-600 bg-blue-50"
                               )}
                               onClick={(e) => {
                                 e.stopPropagation();
