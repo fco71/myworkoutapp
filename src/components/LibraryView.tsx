@@ -716,6 +716,7 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                         onClick={() => {
                           const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0), notes: e.notes || "" }));
                           onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id });
+                          toasts.push(`Loaded "${it.name}" and opened Workout Session.`, 'success');
                         }}
                         className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-sm"
                         title="Replace current workout with this routine"
@@ -729,6 +730,7 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                         onClick={() => {
                           const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0), notes: e.notes || "" }));
                           onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id }, 'append');
+                          toasts.push(`Added ${exercises.length} exercise${exercises.length === 1 ? '' : 's'} from "${it.name}".`, 'success');
                         }}
                         title="Add all exercises from this routine to current workout"
                         className="border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-300"
@@ -748,6 +750,7 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                           // For individual exercises, add them to current session
                           const exercise = { id: crypto.randomUUID(), name: it.name, minSets: it.minSets || 3, targetReps: it.targetReps || 8, intensity: 0, sets: Array(it.minSets || 3).fill(0), notes: it.notes || "" };
                           onLoadRoutine({ dateISO: toISO(new Date()), sessionName: 'Current Session', exercises: [exercise], completed: false, sessionTypes: [], durationSec: 0 }, 'append');
+                          toasts.push(`Added "${it.name}" to the current workout.`, 'success');
                         }}
                         className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-sm"
                         title="Add this single exercise to your current workout"

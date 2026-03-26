@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useSyncExternalStore } from "react";
 import { WeeklyPlan } from "@/types";
 
 // Re-export cn from the existing utils for convenience
@@ -83,14 +83,42 @@ export function createEmptyWeek(mondayDate: Date, customTypes: string[] = [], ty
   };
 }
 
+type ToastMessage = { id: string; text: string; kind?: 'info' | 'success' | 'error' };
+
+const toastStore = {
+  messages: [] as ToastMessage[],
+  listeners: new Set<() => void>(),
+};
+
+function emitToastChange() {
+  toastStore.listeners.forEach((listener) => listener());
+}
+
+function subscribeToToasts(listener: () => void) {
+  toastStore.listeners.add(listener);
+  return () => {
+    toastStore.listeners.delete(listener);
+  };
+}
+
+function getToastSnapshot() {
+  return toastStore.messages;
+}
+
 // --- Toast helper (non-blocking feedback) ---
 export function useToasts() {
-  const [messages, setMessages] = useState<{ id: string; text: string; kind?: 'info' | 'success' | 'error' }[]>([]);
+  const messages = useSyncExternalStore(subscribeToToasts, getToastSnapshot, getToastSnapshot);
+
   const push = (text: string, kind?: 'info' | 'success' | 'error') => {
-    const id = crypto.randomUUID();
-    setMessages((s) => [...s, { id, text, kind }]);
+    toastStore.messages = [...toastStore.messages, { id: crypto.randomUUID(), text, kind }];
+    emitToastChange();
   };
-  const dismiss = (id: string) => setMessages((s) => s.filter((m) => m.id !== id));
+
+  const dismiss = (id: string) => {
+    toastStore.messages = toastStore.messages.filter((message) => message.id !== id);
+    emitToastChange();
+  };
+
   return { messages, push, dismiss };
 }
 

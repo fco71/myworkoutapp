@@ -48,6 +48,7 @@ export default function WorkoutTrackerApp() {
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [showSignIn, setShowSignIn] = useState(false);
+  const [activeTab, setActiveTab] = useState("week");
 
   // Request notification permissions on app initialization
   useEffect(() => {
@@ -703,7 +704,7 @@ export default function WorkoutTrackerApp() {
           <WeeklyOverview weekly={weekly} previousWeeks={previousWeeks} />
         </header>
 
-        <Tabs defaultValue="week" className="">
+        <Tabs defaultValue="week" value={activeTab} onValueChange={setActiveTab} className="">
           <TabsList className="grid grid-cols-4 w-full md:w-auto bg-white/80 backdrop-blur-sm border border-slate-200 shadow-sm">
             <TabsTrigger value="week" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">Weekly Tracker</TabsTrigger>
             <TabsTrigger value="workout" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">Workout Session</TabsTrigger>
@@ -767,6 +768,7 @@ export default function WorkoutTrackerApp() {
               } else {
                 setSession(r);
               }
+              setActiveTab('workout');
             }} />
           </TabsContent>
         </Tabs>

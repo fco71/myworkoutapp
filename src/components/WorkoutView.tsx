@@ -4,7 +4,26 @@ import { doc, setDoc, collection, addDoc, getDocs, deleteDoc, getDoc } from "fir
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, Check, Save, Bookmark, ChevronDown, ChevronRight, MessageSquare } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Check,
+  Save,
+  Bookmark,
+  ChevronDown,
+  ChevronRight,
+  MessageSquare,
+  CalendarDays,
+  Play,
+  Pause,
+  RotateCcw,
+  Dumbbell,
+  Activity,
+  TimerReset,
+  Trophy,
+  Sparkles,
+  ListChecks,
+} from "lucide-react";
 import { ResistanceExercise, ResistanceSession, WeeklyPlan } from "@/types";
 import {
   cn,
@@ -15,6 +34,35 @@ import {
   completedGuards,
 } from "@/lib/workout-utils";
 import { playWorkoutCompletionSound } from "@/lib/audio";
+
+function getExerciseProgress(exercise: ResistanceExercise) {
+  const sum = exercise.sets.reduce((total, reps) => total + (reps || 0), 0);
+  const firstTargetSets = exercise.sets.slice(0, exercise.minSets);
+  const allFirstSetsMeetTarget =
+    firstTargetSets.length >= exercise.minSets &&
+    firstTargetSets.every((reps) => reps >= exercise.targetReps);
+  const totalTarget = exercise.minSets * exercise.targetReps;
+  const goalMet = allFirstSetsMeetTarget || sum >= totalTarget;
+
+  return {
+    sum,
+    totalTarget,
+    goalMet,
+    progressPercent: totalTarget > 0 ? Math.min(100, Math.round((sum / totalTarget) * 100)) : 0,
+  };
+}
+
+function formatDuration(totalSeconds: number) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
 
 function ExerciseCard({
   ex,
@@ -33,11 +81,7 @@ function ExerciseCard({
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const setOK = (rep: number) => rep >= ex.targetReps;
-  const sum = ex.sets.reduce((a, b) => a + (b || 0), 0);
-  const firstN = ex.sets.slice(0, ex.minSets);
-  const allFirstNMeet = firstN.length >= ex.minSets && firstN.every((r) => r >= ex.targetReps);
-  const totalTarget = ex.minSets * ex.targetReps;
-  const goalMet = allFirstNMeet || sum >= totalTarget;
+  const { sum, totalTarget, goalMet, progressPercent } = getExerciseProgress(ex);
 
   // Exercise history state
   const [exerciseHistory, setExerciseHistory] = useState<{lastWorkout?: any; personalRecord?: any; recentWorkouts?: any[]}>({});
@@ -238,229 +282,336 @@ function ExerciseCard({
 
   const { lastWorkout, personalRecord, recentWorkouts } = exerciseHistory;
   const hasHistory = lastWorkout || personalRecord || (recentWorkouts && recentWorkouts.length > 0);
+  const hasExtendedHistory = Boolean((recentWorkouts && recentWorkouts.length > 1) || personalRecord);
 
   return (
-    <Card className={cn(
-      "transition-all duration-300 hover:shadow-lg",
-      goalMet ? "border-emerald-500 bg-gradient-to-br from-emerald-50 to-green-50 shadow-emerald-100" : "border-slate-200 bg-white shadow-slate-100"
-    )}>
-      <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500 font-medium">Exercise Name</label>
-            <Input
-              value={ex.name || ""}
-              onChange={(e) => updateExercise(ex.id, { name: e.target.value })}
-              placeholder="Enter exercise name (e.g., Push ups, Bodyweight Row)"
-              className="max-w-xs min-w-[200px] border-2"
-            />
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            <label className="text-neutral-600">Min sets</label>
-            <Input
-              type="number"
-              className="w-20"
-              value={ex.minSets}
-              min={1}
-              onChange={(e) => updateExercise(ex.id, { minSets: Math.max(1, parseInt(e.target.value || "1")) })}
-            />
-            <label className="text-neutral-600">Target reps</label>
-            <Input
-              type="number"
-              className="w-20"
-              value={ex.targetReps}
-              min={1}
-              onChange={(e) => updateExercise(ex.id, { targetReps: Math.max(1, parseInt(e.target.value || "1")) })}
-            />
-            <label className="text-neutral-600">Intensity</label>
-            <Input
-              type="number"
-              className="w-20"
-              value={ex.intensity || 0}
-              min={0}
-              max={999}
-              placeholder="0"
-              onChange={(e) => updateExercise(ex.id, { intensity: Math.max(0, Math.min(999, parseInt(e.target.value || "0"))) })}
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-3 text-sm">
-          <div className="font-medium">Total: {sum} / {totalTarget}</div>
-          <span className={cn("flex items-center gap-1", goalMet ? "text-green-700" : "invisible")}>
-            <Check className="h-4 w-4"/> goal met
-          </span>
-          {confirmDelete ? (
-            <>
-              <span className="text-sm text-red-600 font-medium">Remove?</span>
-              <Button variant="destructive" size="sm" onClick={onDelete}>Yes</Button>
-              <Button variant="outline" size="sm" onClick={() => setConfirmDelete(false)}>No</Button>
-            </>
-          ) : (
-            <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
-              <Trash2 className="mr-2 h-4 w-4" /> Remove
-            </Button>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          {/* Current Sets Input */}
-          <div className="flex flex-wrap gap-2 items-start">
-            {ex.sets.map((rep, i) => (
-              <div key={i} className="flex flex-col items-center gap-1">
-                <div className="flex items-center gap-1">
-                  <Input
-                    type="number"
-                    className={cn(
-                      "w-20 text-center",
-                      setOK(rep) && "bg-green-50 border-green-400 text-green-900"
-                    )}
-                    value={rep}
-                    onChange={(e) => updateSet(ex.id, i, Math.max(0, parseInt(e.target.value || "0")))}
-                  />
-                  <Button variant="secondary" size="icon" onClick={() => removeSet(ex.id, i)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-                {/* Previous session data directly below each input */}
-                {lastWorkout && lastWorkout.sets && lastWorkout.sets[i] !== undefined && (
-                  <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-200 min-w-[20px] text-center">
-                    {lastWorkout.sets[i]}
-                  </div>
+    <Card
+      className={cn(
+        "overflow-hidden border shadow-lg transition-all duration-300",
+        goalMet
+          ? "border-emerald-300 bg-gradient-to-br from-emerald-50 via-white to-lime-50 shadow-emerald-100"
+          : "border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 shadow-slate-100"
+      )}
+    >
+      <CardHeader className="gap-5 border-b border-white/70 bg-white/75 backdrop-blur-sm">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0 flex-1 space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]",
+                  goalMet ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"
                 )}
-              </div>
-            ))}
-            <Button onClick={() => addSet(ex.id)} className="mt-0">
-              <Plus className="mr-2 h-4 w-4"/> Add set
-            </Button>
-          </div>
-
-          {/* Last Session Reference Summary */}
-          {lastWorkout && lastWorkout.sets && lastWorkout.sets.length > 0 && (
-            <div className="text-xs text-blue-700 bg-blue-50 px-3 py-2 rounded border border-blue-200">
-              <div className="flex items-center justify-between">
-                <span className="font-medium">
-                  Last: {lastWorkout.sessionDate.toLocaleDateString()}
+              >
+                {goalMet ? "On target" : "In progress"}
+              </span>
+              <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                {ex.sets.length} sets tracked
+              </span>
+              {lastWorkout?.sessionDate && (
+                <span className="inline-flex items-center rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700">
+                  Last done {lastWorkout.sessionDate.toLocaleDateString()}
                 </span>
-                <div className="flex items-center gap-2">
-                  <span>Total: {lastWorkout.sets.reduce((sum: number, reps: number) => sum + reps, 0)}</span>
-                  {lastWorkout.intensity && (
-                    <span>Intensity: {lastWorkout.intensity}</span>
-                  )}
-                </div>
-              </div>
-              {lastWorkout.notes && (
-                <div className="mt-1 text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">
-                  <span className="font-medium">Notes:</span> {lastWorkout.notes}
-                </div>
               )}
             </div>
-          )}
 
-          {/* Exercise Notes */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <MessageSquare className="h-4 w-4 text-gray-500" />
-              <span className="text-sm font-medium text-gray-700">Notes</span>
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,0.55fr))]">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Exercise</label>
+                <Input
+                  value={ex.name || ""}
+                  onChange={(e) => updateExercise(ex.id, { name: e.target.value })}
+                  placeholder="Enter exercise name (e.g., Push ups, Bodyweight Row)"
+                  className="h-12 border-slate-200 bg-white text-base font-semibold shadow-sm"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Min sets</label>
+                <Input
+                  type="number"
+                  className="h-12 border-slate-200 bg-white text-center text-base font-semibold shadow-sm"
+                  value={ex.minSets}
+                  min={1}
+                  onChange={(e) => updateExercise(ex.id, { minSets: Math.max(1, parseInt(e.target.value || "1")) })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Target reps</label>
+                <Input
+                  type="number"
+                  className="h-12 border-slate-200 bg-white text-center text-base font-semibold shadow-sm"
+                  value={ex.targetReps}
+                  min={1}
+                  onChange={(e) => updateExercise(ex.id, { targetReps: Math.max(1, parseInt(e.target.value || "1")) })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Intensity</label>
+                <Input
+                  type="number"
+                  className="h-12 border-slate-200 bg-white text-center text-base font-semibold shadow-sm"
+                  value={ex.intensity || 0}
+                  min={0}
+                  max={999}
+                  placeholder="0"
+                  onChange={(e) =>
+                    updateExercise(ex.id, { intensity: Math.max(0, Math.min(999, parseInt(e.target.value || "0"))) })
+                  }
+                />
+              </div>
             </div>
-            <Input
-              placeholder="Add notes about this exercise (form cues, weight used, etc.)"
-              value={ex.notes || ''}
-              onChange={(e) => updateExercise(ex.id, { notes: e.target.value })}
-              className="text-sm"
-            />
           </div>
 
-          {/* Helper message for unnamed exercises */}
-          {!ex.name.trim() || ex.name === 'New exercise' ? (
-            <div className="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded border border-amber-200">
-              💡 Enter an exercise name above to see your previous performance
+          <div className="w-full rounded-3xl bg-slate-950/95 p-5 text-white shadow-xl xl:max-w-sm">
+            <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
+              <span>Progress</span>
+              <span>{sum} / {totalTarget}</span>
             </div>
-          ) : null}
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/15">
+              <div
+                className={cn(
+                  "h-full rounded-full transition-all",
+                  goalMet ? "bg-emerald-400" : "bg-sky-400"
+                )}
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-2xl bg-white/10 px-3 py-3">
+                <div className="text-xs uppercase tracking-[0.18em] text-slate-300">Status</div>
+                <div className="mt-1 font-semibold text-white">{goalMet ? "Goal met" : "Keep pushing"}</div>
+              </div>
+              <div className="rounded-2xl bg-white/10 px-3 py-3">
+                <div className="text-xs uppercase tracking-[0.18em] text-slate-300">Volume</div>
+                <div className="mt-1 font-semibold text-white">{ex.sets.length} sets logged</div>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {confirmDelete ? (
+                <>
+                  <span className="text-sm font-medium text-rose-200">Remove this exercise?</span>
+                  <Button variant="destructive" size="sm" onClick={onDelete}>
+                    Yes, remove
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+                    onClick={() => setConfirmDelete(false)}
+                  >
+                    Keep it
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" /> Remove exercise
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
+      </CardHeader>
 
-        <div className="mt-3 text-xs text-neutral-600">
-          Rule: individual set turns green when it ≥ target reps. Main card turns green when either the first <strong>min sets</strong> all meet target, or the <strong>sum of reps</strong> across all sets ≥ <em>min sets × target reps</em>.
-        </div>
-
-        {/* Expandable Exercise History */}
-        {hasHistory && (recentWorkouts && recentWorkouts.length > 1 || personalRecord) && (
-          <div className="mt-4 pt-4 border-t border-slate-200">
+      <CardContent className="space-y-5 pt-6">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {ex.sets.map((rep, i) => (
             <div
-              className="flex items-center justify-between cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors"
+              key={i}
+              className={cn(
+                "rounded-3xl border p-4 shadow-sm transition-all",
+                setOK(rep)
+                  ? "border-emerald-300 bg-emerald-50"
+                  : "border-slate-200 bg-white"
+              )}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Set {i + 1}</div>
+                  <div className="mt-1 text-sm text-slate-600">Target {ex.targetReps} reps</div>
+                </div>
+                {setOK(rep) && (
+                  <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                    <Check className="mr-1 h-3.5 w-3.5" />
+                    Hit
+                  </span>
+                )}
+              </div>
+
+              <Input
+                type="number"
+                className={cn(
+                  "mt-4 h-14 border-2 text-center text-2xl font-semibold shadow-sm",
+                  setOK(rep)
+                    ? "border-emerald-300 bg-white text-emerald-900"
+                    : "border-slate-200 bg-slate-50 text-slate-900"
+                )}
+                value={rep}
+                onChange={(e) => updateSet(ex.id, i, Math.max(0, parseInt(e.target.value || "0")))}
+              />
+
+              <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                <span>
+                  Previous {lastWorkout && lastWorkout.sets && lastWorkout.sets[i] !== undefined ? lastWorkout.sets[i] : "--"}
+                </span>
+                <button
+                  type="button"
+                  className="font-semibold text-rose-600 transition hover:text-rose-700"
+                  onClick={() => removeSet(ex.id, i)}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+
+          <button
+            type="button"
+            onClick={() => addSet(ex.id)}
+            className="flex min-h-[194px] flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-sky-300 bg-sky-50/70 p-4 text-sky-700 transition hover:border-sky-400 hover:bg-sky-100/70"
+          >
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm">
+              <Plus className="h-5 w-5" />
+            </span>
+            <div className="text-sm font-semibold">Add another set</div>
+            <div className="text-xs text-sky-600">Keep the flow without opening more controls.</div>
+          </button>
+        </div>
+
+        {lastWorkout && lastWorkout.sets && lastWorkout.sets.length > 0 && (
+          <div className="rounded-3xl border border-sky-200 bg-sky-50/80 p-4 text-sm text-sky-900">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Last session reference</div>
+                <div className="mt-1 font-semibold">{lastWorkout.sessionDate.toLocaleDateString()}</div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-sky-800">
+                <span className="rounded-full bg-white px-3 py-1 shadow-sm">
+                  Total {lastWorkout.sets.reduce((total: number, reps: number) => total + reps, 0)} reps
+                </span>
+                {lastWorkout.intensity ? (
+                  <span className="rounded-full bg-white px-3 py-1 shadow-sm">Intensity {lastWorkout.intensity}</span>
+                ) : null}
+                {lastWorkout.sets.map((reps: number, index: number) => (
+                  <span key={index} className="rounded-full bg-white px-3 py-1 shadow-sm">
+                    {reps}
+                  </span>
+                ))}
+              </div>
+            </div>
+            {lastWorkout.notes && (
+              <div className="mt-3 rounded-2xl bg-white/80 px-3 py-2 text-xs text-sky-900 shadow-sm">
+                <span className="font-semibold">Notes:</span> {lastWorkout.notes}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-slate-500" />
+            <span className="text-sm font-semibold text-slate-800">Notes and cues</span>
+          </div>
+          <Input
+            placeholder="Add form cues, weight used, or quick reminders for next time"
+            value={ex.notes || ""}
+            onChange={(e) => updateExercise(ex.id, { notes: e.target.value })}
+            className="border-slate-200 bg-slate-50"
+          />
+        </div>
+
+        {!ex.name.trim() || ex.name === "New exercise" ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-medium text-amber-800">
+            Tip: name the exercise to unlock previous-session context and make this card easier to scan later.
+          </div>
+        ) : null}
+
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+          Rule: a set is complete once it reaches target reps. The card is complete when the first <strong>min sets</strong>
+          {" "}all hit target or total reps reach <em>min sets x target reps</em>.
+        </div>
+
+        {hasHistory && hasExtendedHistory && (
+          <div className="border-t border-slate-200 pt-4">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:bg-slate-100"
               onClick={() => setHistoryExpanded(!historyExpanded)}
             >
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-slate-700">More History</span>
-                {recentWorkouts && recentWorkouts.length > 1 && (
-                  <span className="text-xs text-gray-500">({recentWorkouts.length - 1} previous sessions)</span>
-                )}
-                {historyLoading && <span className="text-xs text-gray-500">Loading...</span>}
+                <span className="text-sm font-semibold text-slate-800">More history</span>
+                {recentWorkouts && recentWorkouts.length > 1 ? (
+                  <span className="text-xs text-slate-500">({recentWorkouts.length - 1} previous sessions)</span>
+                ) : null}
+                {historyLoading ? <span className="text-xs text-slate-500">Loading...</span> : null}
               </div>
               {historyExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            </div>
+            </button>
 
             {historyExpanded && !historyLoading && (
-              <div className="mt-3 space-y-3">
-                {/* Personal Record */}
+              <div className="mt-4 space-y-3">
                 {personalRecord && personalRecord !== lastWorkout && (
-                  <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-lg p-3">
-                    <h4 className="text-sm font-semibold text-amber-700 mb-2 flex items-center gap-2">
-                      <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
-                      Personal Record ({personalRecord.sessionDate.toLocaleDateString()})
+                  <div className="rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-4">
+                    <h4 className="flex items-center gap-2 text-sm font-semibold text-amber-800">
+                      <Trophy className="h-4 w-4" />
+                      Personal record ({personalRecord.sessionDate.toLocaleDateString()})
                     </h4>
-                    <div className="flex gap-2 flex-wrap items-center">
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
                       {(personalRecord.sets || []).map((reps: number, i: number) => (
-                        <div key={i} className="bg-amber-100 text-amber-800 px-2 py-1 rounded text-sm font-medium">
+                        <div key={i} className="rounded-full bg-amber-100 px-3 py-1 font-semibold text-amber-900">
                           {reps}
                         </div>
                       ))}
-                      <span className="text-xs text-amber-600 ml-2">
-                        Total: {(personalRecord.sets || []).reduce((sum: number, reps: number) => sum + reps, 0)} reps
+                      <span className="text-xs font-medium text-amber-700">
+                        Total {(personalRecord.sets || []).reduce((total: number, reps: number) => total + reps, 0)} reps
                       </span>
-                      {personalRecord.intensity && (
-                        <span className="text-xs text-amber-600">I:{personalRecord.intensity}</span>
-                      )}
+                      {personalRecord.intensity ? (
+                        <span className="text-xs font-medium text-amber-700">Intensity {personalRecord.intensity}</span>
+                      ) : null}
                     </div>
                     {personalRecord.notes && (
-                      <div className="mt-2 text-xs text-amber-700 bg-amber-100 px-2 py-1 rounded">
-                        <span className="font-medium">Notes:</span> {personalRecord.notes}
+                      <div className="mt-3 rounded-2xl bg-amber-100/80 px-3 py-2 text-xs text-amber-900">
+                        <span className="font-semibold">Notes:</span> {personalRecord.notes}
                       </div>
                     )}
                   </div>
                 )}
 
-                {/* Previous Sessions History */}
                 {recentWorkouts && recentWorkouts.length > 1 && (
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                    <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                      <span className="w-2 h-2 bg-gray-500 rounded-full"></span>
-                      Previous Sessions
-                    </h4>
-                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                  <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                    <h4 className="text-sm font-semibold text-slate-800">Previous sessions</h4>
+                    <div className="mt-3 space-y-2">
                       {recentWorkouts.slice(1).map((workout: any, i: number) => (
-                        <div key={`${workout.sessionId}-${i}`} className="text-sm py-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-gray-600 font-medium">
-                              {workout.sessionDate.toLocaleDateString()}
-                            </span>
-                            <div className="flex gap-1 items-center">
+                        <div
+                          key={`${workout.sessionId}-${i}`}
+                          className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+                        >
+                          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                            <span className="font-semibold text-slate-700">{workout.sessionDate.toLocaleDateString()}</span>
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                               {(workout.sets || []).map((reps: number, j: number) => (
-                                <span key={j} className="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded text-xs font-medium">
+                                <span key={j} className="rounded-full bg-white px-2.5 py-1 font-medium shadow-sm">
                                   {reps}
                                 </span>
                               ))}
-                              {workout.intensity && (
-                                <span className="text-gray-500 text-xs ml-1">I:{workout.intensity}</span>
-                              )}
-                              <span className="text-gray-500 text-xs ml-2">
-                                ({(workout.sets || []).reduce((sum: number, reps: number) => sum + reps, 0)} total)
+                              {workout.intensity ? (
+                                <span className="font-medium text-slate-500">Intensity {workout.intensity}</span>
+                              ) : null}
+                              <span className="font-medium text-slate-500">
+                                Total {(workout.sets || []).reduce((total: number, reps: number) => total + reps, 0)}
                               </span>
                             </div>
                           </div>
                           {workout.notes && (
-                            <div className="mt-1 text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded">
-                              <span className="font-medium">Notes:</span> {workout.notes}
+                            <div className="mt-2 rounded-xl bg-white px-3 py-2 text-xs text-slate-600 shadow-sm">
+                              <span className="font-semibold">Notes:</span> {workout.notes}
                             </div>
                           )}
                         </div>
@@ -517,13 +668,20 @@ export function WorkoutView({
   // initialize whether current session (template) is favorited by the user
   useEffect(() => {
     let mounted = true;
+    let unsubscribe: (() => void) | undefined;
+
     const initFav = async () => {
       try {
         const uid = auth.currentUser?.uid;
         const itemId = session.sourceTemplateId;
-        if (!uid || !itemId) return;
+        if (!uid || !itemId) {
+          setSessionFavorited(false);
+          return;
+        }
+
         // attach a snapshot listener for this user's favorites so UI stays in sync across tabs
-        const unsub = (await import('firebase/firestore')).onSnapshot(collection(db, 'users', uid, 'favorites'), (snap) => {
+        const { onSnapshot } = await import('firebase/firestore');
+        unsubscribe = onSnapshot(collection(db, 'users', uid, 'favorites'), (snap) => {
           try {
             const favSet = new Set<string>();
             snap.docs.forEach(d => {
@@ -536,14 +694,17 @@ export function WorkoutView({
             if (mounted) setSessionFavorited(favSet.has(favId));
           } catch (e) { console.warn('favorites snapshot handling failed', e); }
         });
-        return () => unsub && unsub();
       } catch (e) {
         console.warn('Failed to load session favorite', e);
       }
     };
-    // call initFav
-    (async () => { await initFav(); })();
-    return () => { mounted = false; };
+
+    void initFav();
+
+    return () => {
+      mounted = false;
+      unsubscribe?.();
+    };
   }, [session.sourceTemplateId]);
 
   useEffect(() => {
@@ -580,6 +741,22 @@ export function WorkoutView({
     const totalReps = session.exercises.reduce((a, e) => a + e.sets.reduce((x, y) => x + (y || 0), 0), 0);
     return { totalExercises, totalSets, totalReps };
   }, [session.exercises]);
+  const completedExercises = useMemo(
+    () => session.exercises.filter((exercise) => getExerciseProgress(exercise).goalMet).length,
+    [session.exercises]
+  );
+  const completionPercent = totalStats.totalExercises > 0
+    ? Math.round((completedExercises / totalStats.totalExercises) * 100)
+    : 0;
+  const sessionTypesLabel = session.sessionTypes.length > 0 ? session.sessionTypes.join(", ") : "Uncategorized";
+  const nextFocusExercise = session.exercises.find((exercise) => !getExerciseProgress(exercise).goalMet);
+  const nextFocusLabel = nextFocusExercise?.name?.trim() || session.exercises[0]?.name?.trim() || "Add an exercise";
+  const formattedSessionDate = new Date(session.dateISO + "T00:00").toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
 
   const addExercise = () => {
     setSession({
@@ -694,7 +871,7 @@ export function WorkoutView({
     // The completed workout is now saved in history and remains editable there
     setTimeout(() => {
       setSession(defaultSession());
-      toasts.push('🎉 Workout completed! Starting fresh workout session.', 'success');
+      toasts.push('Workout completed. Starting a fresh workout session.', 'success');
     }, 1500); // Small delay to let user see the completion state
 
     // leave the guard true to prevent re-entry
@@ -788,148 +965,359 @@ export function WorkoutView({
     }
   };
 
+  const toggleSessionFavorite = async () => {
+    try {
+      const uid = auth.currentUser?.uid;
+      if (!uid) return toasts.push('Sign in to favorite', 'info');
+
+      const itemId = session.sourceTemplateId;
+      const itemType = itemId ? 'routine' : null;
+
+      if (itemId) {
+        const favId = `${itemType}::${itemId}`;
+        if (pendingFavorites.has(favId)) return;
+
+        setPendingFavorites((prev) => new Set(prev).add(favId));
+        setSessionFavorited((current) => !current);
+
+        try {
+          const favRef = doc(db, 'users', uid, 'favorites', favId);
+          const favSnap = await getDoc(favRef);
+          if (favSnap.exists()) {
+            await deleteDoc(favRef);
+            toasts.push('Removed favorite', 'success');
+          } else {
+            await setDoc(favRef, { itemType, itemId, createdAt: Date.now() });
+            toasts.push('Favorited', 'success');
+          }
+        } catch (error) {
+          console.error('Favorite current session failed', error);
+          setSessionFavorited((current) => !current);
+          toasts.push('Failed', 'error');
+        } finally {
+          setPendingFavorites((prev) => {
+            const next = new Set(prev);
+            next.delete(favId);
+            return next;
+          });
+        }
+        return;
+      }
+
+      const payload = {
+        name: session.sessionName || 'Routine',
+        exercises: session.exercises.map((exercise) => ({
+          name: exercise.name,
+          minSets: exercise.minSets,
+          targetReps: exercise.targetReps,
+        })),
+        sessionTypes: session.sessionTypes || [],
+        createdAt: Date.now(),
+        public: false,
+        owner: uid,
+        ownerName: 'User',
+      };
+
+      const ref = collection(db, 'users', uid, 'routines');
+      const docRef = await addDoc(ref, payload as any);
+      const favId = `routine::${docRef.id}`;
+      setPendingFavorites((prev) => new Set(prev).add(favId));
+
+      try {
+        await setDoc(doc(db, 'users', uid, 'favorites', favId), {
+          itemType: 'routine',
+          itemId: docRef.id,
+          createdAt: Date.now(),
+        });
+        toasts.push('Saved routine and favorited', 'success');
+      } catch (error) {
+        console.error('Favorite current session failed', error);
+        toasts.push('Failed', 'error');
+      } finally {
+        setPendingFavorites((prev) => {
+          const next = new Set(prev);
+          next.delete(favId);
+          return next;
+        });
+      }
+    } catch (error) {
+      console.error('Favorite current session failed', error);
+      toasts.push('Failed', 'error');
+    }
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <Card className="w-full bg-gradient-to-r from-slate-50 to-blue-50">
-          <CardHeader>
-            <div className="flex items-center gap-4">
-              <div className="flex-1">
+    <div className="space-y-6">
+      <Card className="overflow-hidden border-0 bg-[radial-gradient(circle_at_top_left,_rgba(125,211,252,0.28),_transparent_38%),radial-gradient(circle_at_top_right,_rgba(196,181,253,0.22),_transparent_34%),linear-gradient(135deg,#f8fafc_0%,#eff6ff_48%,#f8fafc_100%)] shadow-xl shadow-slate-200/70">
+        <CardHeader className="gap-6 border-b border-white/70 bg-white/75 backdrop-blur-sm">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0 flex-1 space-y-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white">
+                  Workout session
+                </span>
+                <span className="inline-flex items-center rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700">
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                  {sessionTypesLabel}
+                </span>
+                {session.sourceTemplateId ? (
+                  <span className="inline-flex items-center rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700">
+                    From library
+                  </span>
+                ) : null}
+                {session.completed ? (
+                  <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">
+                    <Check className="mr-1.5 h-3.5 w-3.5" />
+                    Completed
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Session name</label>
                 <Input
                   value={session.sessionName}
                   onChange={(e) => setSession({ ...session, sessionName: e.target.value })}
-                  className="text-xl font-bold border-0 bg-transparent p-0"
+                  className="h-14 border-white/70 bg-white/90 text-2xl font-semibold tracking-tight shadow-sm"
                   placeholder="Workout name (e.g., Legs, Upper Body)"
                 />
-                <p className="text-sm text-slate-600 mt-1">
-                    {new Date(session.dateISO + 'T00:00').toLocaleDateString('en-US', {
-                      weekday: 'long',
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric',
-                    })}
-                </p>
-              </div>
-              <div className="flex flex-col items-end gap-2">
-                {/* Removed inline timer display — main timer remains below as requested */}
-                <div className="flex gap-2">
-                  {!timerRunning ? (
-                    <Button onClick={() => setTimerRunning(true)}>Start</Button>
-                  ) : (
-                    <Button variant="destructive" onClick={() => setTimerRunning(false)}>Pause</Button>
-                  )}
-                  <Button variant="outline" onClick={resetTimer}>Reset</Button>
+                <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-white/85 px-3 py-1.5 shadow-sm">
+                    <CalendarDays className="h-4 w-4 text-slate-500" />
+                    {formattedSessionDate}
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-full bg-white/85 px-3 py-1.5 shadow-sm">
+                    <ListChecks className="h-4 w-4 text-slate-500" />
+                    Next focus: {nextFocusLabel}
+                  </span>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+            </div>
+
+            <div className="grid w-full gap-3 sm:grid-cols-2 xl:w-[420px]">
+              <div className="rounded-3xl bg-white/85 p-4 shadow-sm ring-1 ring-white/70">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Elapsed</div>
+                <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{formatDuration(timerSec)}</div>
+                <div className="mt-1 text-sm text-slate-500">{timerRunning ? "Timer running" : "Timer paused"}</div>
+              </div>
+              <div className="rounded-3xl bg-white/85 p-4 shadow-sm ring-1 ring-white/70">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Progress</div>
+                <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
+                  {completedExercises}/{totalStats.totalExercises}
+                </div>
+                <div className="mt-1 text-sm text-slate-500">Exercises at goal</div>
+              </div>
+              <div className="rounded-3xl bg-white/85 p-4 shadow-sm ring-1 ring-white/70">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Sets logged</div>
+                <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{totalStats.totalSets}</div>
+                <div className="mt-1 text-sm text-slate-500">Across the whole session</div>
+              </div>
+              <div className="rounded-3xl bg-white/85 p-4 shadow-sm ring-1 ring-white/70">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Total reps</div>
+                <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{totalStats.totalReps}</div>
+                <div className="mt-1 text-sm text-slate-500">Current volume</div>
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="grid gap-4 pt-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+          <div className="rounded-[2rem] bg-slate-950 p-6 text-white shadow-2xl shadow-slate-300/50">
+            <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Live timer</div>
+                <div className="mt-3 text-5xl font-semibold tracking-tight">{formatDuration(timerSec)}</div>
+                <div className="mt-2 max-w-md text-sm text-slate-300">
+                  Keep the timer and completion action together so the workout always has a single obvious control point.
+                </div>
+              </div>
+              <div className="rounded-3xl bg-white/10 px-4 py-4 md:min-w-[180px]">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Session status</div>
+                <div className="mt-2 text-2xl font-semibold">
+                  {session.completed ? "Completed" : `${completionPercent}% ready`}
+                </div>
+                <div className="mt-1 text-sm text-slate-300">
+                  {completedExercises} of {totalStats.totalExercises} exercises hit their target.
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 h-2 overflow-hidden rounded-full bg-white/10">
+              <div className="h-full rounded-full bg-gradient-to-r from-sky-400 via-cyan-300 to-emerald-400 transition-all" style={{ width: `${completionPercent}%` }} />
+            </div>
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              {!timerRunning ? (
+                <Button
+                  onClick={() => setTimerRunning(true)}
+                  className="bg-white text-slate-950 hover:bg-slate-100"
+                >
+                  <Play className="mr-2 h-4 w-4" />
+                  Start timer
+                </Button>
+              ) : (
+                <Button
+                  variant="destructive"
+                  onClick={() => setTimerRunning(false)}
+                  className="bg-rose-500 text-white hover:bg-rose-600"
+                >
+                  <Pause className="mr-2 h-4 w-4" />
+                  Pause timer
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                onClick={resetTimer}
+                className="border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+              >
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Reset
+              </Button>
+              {!session.completed ? (
+                <Button
+                  onClick={completeWorkout}
+                  className="bg-emerald-500 text-white hover:bg-emerald-600"
+                >
+                  <Check className="mr-2 h-4 w-4" />
+                  Complete workout
+                </Button>
+              ) : (
+                <div className="inline-flex items-center rounded-full bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-300">
+                  <Check className="mr-2 h-4 w-4" />
+                  Workout completed
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-[2rem] border border-slate-200 bg-white/85 p-6 shadow-sm">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Session controls</div>
+            <div className="mt-5 space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">Session date</label>
                 <Input
                   type="date"
                   value={session.dateISO}
                   onChange={(e) => setSession({ ...session, dateISO: e.target.value })}
-                  className="w-auto"
+                  className="border-slate-200 bg-slate-50"
                 />
-                  <Button variant="outline" onClick={async ()=>{
-                    try {
-                      const uid = auth.currentUser?.uid; if (!uid) return toasts.push('Sign in to favorite', 'info');
-                      const itemId = session.sourceTemplateId;
-                      const itemType = itemId ? 'routine' : null;
-                      if (itemId) {
-                        // prevent rapid toggles by tracking pending favs
-                        const favId = `${itemType}::${itemId}`;
-                        if (pendingFavorites.has(favId)) return; // noop while pending
-                        setPendingFavorites(prev => new Set(prev).add(favId));
-                        // optimistic UI
-                        setSessionFavorited((s) => !s);
-                        try {
-                          const favRef = doc(db, 'users', uid, 'favorites', favId);
-                          const favSnap = await getDoc(favRef);
-                          if (favSnap.exists()) { await deleteDoc(favRef); toasts.push('Removed favorite', 'success'); }
-                          else { await setDoc(favRef, { itemType, itemId, createdAt: Date.now() }); toasts.push('Favorited', 'success'); }
-                        } catch (e) {
-                          console.error('Favorite current session failed', e);
-                          // rollback
-                          setSessionFavorited((s) => !s);
-                          toasts.push('Failed', 'error');
-                        } finally {
-                          setPendingFavorites(prev => { const n = new Set(prev); n.delete(favId); return n; });
-                        }
-                        return;
-                      }
-                      // no template id: save current session as routine and favorite it
-                      const payload = { name: session.sessionName || 'Routine', exercises: session.exercises.map(e=>({ name: e.name, minSets: e.minSets, targetReps: e.targetReps })), sessionTypes: session.sessionTypes || [], createdAt: Date.now(), public: false, owner: uid, ownerName: 'User' };
-                      const ref = collection(db, 'users', uid, 'routines');
-                      const docRef = await addDoc(ref, payload as any);
-                      const favId = `routine::${docRef.id}`;
-                      setPendingFavorites(prev => new Set(prev).add(favId));
-                      try {
-                        await setDoc(doc(db, 'users', uid, 'favorites', favId), { itemType: 'routine', itemId: docRef.id, createdAt: Date.now() });
-                        toasts.push('Saved routine and favorited', 'success');
-                      } catch (e) {
-                        console.error('Favorite current session failed', e);
-                        toasts.push('Failed', 'error');
-                      } finally { setPendingFavorites(prev => { const n = new Set(prev); n.delete(favId); return n; }); }
-                    } catch (e) { console.error('Favorite current session failed', e); toasts.push('Failed', 'error'); }
-                  }} title="Favorite this session" disabled={!!(session.sourceTemplateId && pendingFavorites.has(`routine::${session.sourceTemplateId}`))}>
-                    <Bookmark className={cn('h-4 w-4', sessionFavorited && 'text-yellow-500')} />
-                  </Button>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button variant="outline" onClick={loadRoutines} className="justify-start border-slate-200 bg-white">
+                  <Dumbbell className="mr-2 h-4 w-4" />
+                  Load routine
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={saveRoutine}
+                  disabled={isSaving}
+                  className="justify-start bg-slate-900 text-white hover:bg-slate-800"
+                >
+                  <Save className="mr-2 h-4 w-4" />
+                  {isSaving ? 'Saving...' : 'Save routine'}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={toggleSessionFavorite}
+                  title="Favorite this session"
+                  disabled={!!(session.sourceTemplateId && pendingFavorites.has(`routine::${session.sourceTemplateId}`))}
+                  className="justify-start border-slate-200 bg-white"
+                >
+                  <Bookmark className={cn('mr-2 h-4 w-4', sessionFavorited && 'fill-yellow-400 text-yellow-500')} />
+                  {sessionFavorited ? 'Favorited' : 'Favorite session'}
+                </Button>
+                <Button onClick={addExercise} className="justify-start bg-sky-600 text-white hover:bg-sky-700">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add exercise
+                </Button>
+              </div>
+
+              <div className="rounded-3xl bg-slate-50 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <Activity className="h-4 w-4 text-sky-600" />
+                  Current focus
+                </div>
+                <div className="mt-2 text-base font-semibold text-slate-900">{nextFocusLabel}</div>
+                <div className="mt-1 text-sm text-slate-600">
+                  Keep moving down the list and use the exercise cards for reps, notes, and previous-session context.
+                </div>
               </div>
             </div>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
-              <div><strong>Exercises:</strong> {totalStats.totalExercises}</div>
-              <div>• <strong>Sets:</strong> {totalStats.totalSets}</div>
-              <div>• <strong>Total reps:</strong> {totalStats.totalReps}</div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight text-slate-900">Exercises</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            Each card keeps editing, progress, and history in one place so you do not need to bounce around the screen.
+          </p>
+        </div>
+        <div className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm ring-1 ring-slate-200">
+          <TimerReset className="h-4 w-4 text-slate-400" />
+          {completedExercises} complete of {totalStats.totalExercises}
+        </div>
+      </div>
+
+      {session.exercises.length === 0 ? (
+        <Card className="border-dashed border-sky-300 bg-sky-50/70">
+          <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
+            <div className="rounded-full bg-white p-4 shadow-sm">
+              <Dumbbell className="h-7 w-7 text-sky-600" />
             </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-semibold text-slate-900">No exercises yet</h3>
+              <p className="text-sm text-slate-600">Add one manually or load a routine from your library.</p>
+            </div>
+            <Button onClick={addExercise} className="bg-sky-600 text-white hover:bg-sky-700">
+              <Plus className="mr-2 h-4 w-4" />
+              Add first exercise
+            </Button>
           </CardContent>
         </Card>
-      </div>
+      ) : (
+        session.exercises.map((ex) => (
+          <ExerciseCard
+            key={ex.id}
+            ex={ex}
+            updateExercise={updateExercise}
+            updateSet={updateSet}
+            addSet={addSet}
+            removeSet={removeSet}
+            onDelete={() => deleteExercise(ex.id)}
+          />
+        ))
+      )}
 
-      {session.exercises.map((ex) => (
-        <ExerciseCard
-          key={ex.id}
-          ex={ex}
-          updateExercise={updateExercise}
-          updateSet={updateSet}
-          addSet={addSet}
-          removeSet={removeSet}
-          onDelete={() => deleteExercise(ex.id)}
-        />
-      ))}
-
-      <div className="flex gap-2">
-        <Button onClick={addExercise}>
-          <Plus className="mr-2 h-4 w-4" /> Add exercise
-        </Button>
-        <Button variant="outline" onClick={loadRoutines}>
-          Load Routine
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            saveRoutine();
-          }}
-          disabled={isSaving}
-        >
-          <Save className="mr-2 h-4 w-4"/>
-          {isSaving ? 'Saving...' : 'Save Routine'}
-        </Button>
-        {/* 'New session' removed for Lifestyle Tracker flow */}
-        {!session.completed && (
-          <Button
-            onClick={completeWorkout}
-            className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white"
-          >
-            <Check className="mr-2 h-4 w-4" /> Complete Workout
-          </Button>
-        )}
-        {session.completed && (
-          <div className="flex items-center gap-2 text-green-600 font-semibold">
-            <Check className="h-4 w-4" />
-            Workout Completed!
+      <Card className="border border-slate-200 bg-white/90 shadow-sm">
+        <CardContent className="flex flex-col gap-3 pt-6 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-slate-900">Session footer</div>
+            <div className="mt-1 text-sm text-slate-600">
+              Timer: {formatDuration(timerSec)}. Volume: {totalStats.totalSets} sets and {totalStats.totalReps} reps.
+            </div>
           </div>
-        )}
-      </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={loadRoutines}>
+              <Dumbbell className="mr-2 h-4 w-4" />
+              Load routine
+            </Button>
+            <Button onClick={addExercise} className="bg-sky-600 text-white hover:bg-sky-700">
+              <Plus className="mr-2 h-4 w-4" />
+              Add exercise
+            </Button>
+            {!session.completed ? (
+              <Button onClick={completeWorkout} className="bg-emerald-500 text-white hover:bg-emerald-600">
+                <Check className="mr-2 h-4 w-4" />
+                Complete workout
+              </Button>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Load routine modal */}
       {showLoadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
