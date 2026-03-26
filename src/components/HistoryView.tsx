@@ -326,7 +326,8 @@ export function HistoryView({
                                           ...session,
                                           completed: false, // Mark as not completed so it can be edited
                                           dateISO: toISO(new Date()), // Update to today's date
-                                          durationSec: 0 // Reset timer
+                                          durationSec: 0, // Reset timer
+                                          startedAt: Date.now()
                                         };
                                         setSession(editableSession);
                                         toasts.push('Session loaded for editing', 'success');

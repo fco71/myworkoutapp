@@ -56,6 +56,7 @@ export type ResistanceSession = {
   completed: boolean;
   sessionTypes: string[];
   durationSec: number;
+  startedAt?: number;
   completedAt?: number;
   ts?: number;
   sourceTemplateId?: string;

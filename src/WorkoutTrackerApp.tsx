@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { User, ChevronDown, Settings, LogOut } from "lucide-react";
+import { User, ChevronDown, Settings, LogOut, TimerReset } from "lucide-react";
 import { ToastContainer } from "@/components/ui/toast";
 import { WeeklyPlan, ResistanceSession, PersistedState } from "@/types";
 import {
@@ -523,6 +523,8 @@ export default function WorkoutTrackerApp() {
   });
   const [countdownRunning, setCountdownRunning] = useState(false);
   const [showCountdownModal, setShowCountdownModal] = useState(false);
+  const formattedCountdown = `${Math.floor(countdownSec / 60)}:${String(countdownSec % 60).padStart(2, '0')}`;
+  const showFloatingRestTimer = activeTab === 'workout' || countdownRunning;
 
   useEffect(() => {
     if (!countdownRunning) return;
@@ -754,7 +756,16 @@ export default function WorkoutTrackerApp() {
       </TabsContent>
 
           <TabsContent value="workout" className="mt-4">
-            <WorkoutView session={session} setSession={setSession} weekly={weekly} setWeekly={setWeekly} userName={userName} />
+            <WorkoutView
+              session={session}
+              setSession={setSession}
+              weekly={weekly}
+              setWeekly={setWeekly}
+              userName={userName}
+              restTimerSec={countdownSec}
+              restTimerRunning={countdownRunning}
+              onOpenRestTimer={() => setShowCountdownModal(true)}
+            />
           </TabsContent>
 
           <TabsContent value="history" className="mt-4">
@@ -763,10 +774,16 @@ export default function WorkoutTrackerApp() {
 
           <TabsContent value="library" className="mt-4">
             <LibraryView userName={userName} onLoadRoutine={(r, mode) => {
+              const startedAt = Date.now();
               if (mode === 'append') {
-                setSession((prev) => ({ ...prev, exercises: [...prev.exercises, ...(r.exercises || [])] } as ResistanceSession));
+                setSession((prev) => ({
+                  ...prev,
+                  exercises: [...prev.exercises, ...(r.exercises || [])],
+                  startedAt: prev.startedAt ?? startedAt,
+                  completed: false,
+                } as ResistanceSession));
               } else {
-                setSession(r);
+                setSession({ ...r, startedAt, durationSec: 0, completed: false });
               }
               setActiveTab('workout');
             }} />
@@ -774,43 +791,37 @@ export default function WorkoutTrackerApp() {
         </Tabs>
       </div>
         {/* Floating countdown button */}
-        <div className="fixed right-6 bottom-6 z-50">
-          <div className="relative">
+        {showFloatingRestTimer && (
+          <div className="fixed right-6 bottom-6 z-50">
             <button
-              className={`w-12 h-12 rounded-full text-white flex items-center justify-center shadow-lg transition-all duration-300 ${
-                countdownRunning && countdownSec <= 10
-                  ? 'bg-red-600 animate-pulse scale-125'
-                  : countdownRunning
-                    ? 'bg-orange-600 scale-115'
-                    : 'bg-blue-600'
+              className={`group flex items-center gap-3 rounded-full px-3 py-3 text-white shadow-xl transition-all duration-300 ${
+              countdownRunning && countdownSec <= 10
+                ? 'bg-red-600 animate-pulse'
+                : countdownRunning
+                  ? 'bg-orange-600'
+                  : 'bg-teal-700 hover:bg-teal-800'
               }`}
               onClick={() => setShowCountdownModal(true)}
             >
-              <span className={`transition-all duration-300 ${
-                countdownRunning && countdownSec <= 10
-                  ? 'text-3xl'
-                  : countdownRunning
-                    ? 'text-2xl'
-                    : 'text-xl'
-              }`}>
-                ⏱️
+              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-white/12">
+                <TimerReset className="h-5 w-5" />
+              </span>
+              <span className="flex flex-col items-start pr-1">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/80">Rest timer</span>
+                <span className="text-sm font-semibold">
+                  {countdownRunning ? formattedCountdown : `Ready ${formattedCountdown}`}
+                </span>
               </span>
             </button>
-            {countdownRunning && (
-              <div className={`absolute -top-2 -right-2 text-white text-xs rounded-full px-2 py-0.5 ${
-                countdownSec <= 10 ? 'bg-red-600 animate-pulse' : 'bg-red-600'
-              }`}>
-                {Math.floor(countdownSec/60)}:{String(countdownSec%60).padStart(2,'0')}
-              </div>
-            )}
           </div>
-        </div>
+        )}
 
         {/* Countdown modal */}
         {showCountdownModal && (
           <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50">
             <div className="bg-white p-6 rounded-lg w-full max-w-md">
-              <h3 className="text-lg font-semibold mb-2">Set countdown</h3>
+              <h3 className="text-lg font-semibold mb-2">Rest timer</h3>
+              <p className="mb-4 text-sm text-slate-600">This countdown is separate from workout duration.</p>
               <div className="flex gap-2 items-center mb-3">
                 <label className="text-sm font-medium">Minutes:</label>
                 <Input

@@ -15,8 +15,6 @@ import {
   MessageSquare,
   CalendarDays,
   Play,
-  Pause,
-  RotateCcw,
   Dumbbell,
   Activity,
   TimerReset,
@@ -32,6 +30,7 @@ import {
   saveLocalRoutine,
   defaultSession,
   completedGuards,
+  toISO,
 } from "@/lib/workout-utils";
 import { playWorkoutCompletionSound } from "@/lib/audio";
 
@@ -634,16 +633,21 @@ export function WorkoutView({
   weekly,
   setWeekly,
   userName,
+  restTimerSec,
+  restTimerRunning,
+  onOpenRestTimer,
 }: {
   session: ResistanceSession;
   setSession: (s: ResistanceSession) => void;
   weekly: WeeklyPlan;
   setWeekly: (w: WeeklyPlan) => void;
   userName: string | null;
+  restTimerSec: number;
+  restTimerRunning: boolean;
+  onOpenRestTimer: () => void;
 }) {
   const toasts = useToasts();
   const [pendingFavorites, setPendingFavorites] = useState<Set<string>>(new Set());
-  const [timerRunning, setTimerRunning] = useState(false);
   const [timerSec, setTimerSec] = useState<number>(session.durationSec || 0);
   const [routines, setRoutines] = useState<any[]>([]);
   const [showLoadModal, setShowLoadModal] = useState(false);
@@ -654,16 +658,7 @@ export function WorkoutView({
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [routineName, setRoutineName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-
-  useEffect(() => {
-    let id: any = null;
-    if (timerRunning) {
-      id = setInterval(() => setTimerSec((s) => s + 1), 1000);
-    }
-    return () => {
-      if (id) clearInterval(id);
-    };
-  }, [timerRunning]);
+  const workoutActive = Boolean(session.startedAt && !session.completed);
 
   // initialize whether current session (template) is favorited by the user
   useEffect(() => {
@@ -717,24 +712,26 @@ export function WorkoutView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerSec]);
 
-  // If the parent resets the session (or its duration changes externally),
-  // make sure the local timerSec follows the incoming session prop instead
-  // of persisting the old timer value back into the parent.
   useEffect(() => {
-    const incoming = session.durationSec || 0;
-    if (timerSec !== incoming) {
-      setTimerSec(incoming);
+    const syncTimer = () => {
+      if (session.startedAt && !session.completed) {
+        const elapsed = Math.max(session.durationSec || 0, Math.floor((Date.now() - session.startedAt) / 1000));
+        setTimerSec(elapsed);
+        return;
+      }
+
+      setTimerSec(session.durationSec || 0);
+    };
+
+    syncTimer();
+
+    if (!session.startedAt || session.completed) {
+      return;
     }
-    // only react to changes in the session's duration or identity-ish fields
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.durationSec, session.dateISO, session.completed]);
 
-  // timer formatting handled inline where needed; removed helper to avoid unused warning
-
-  const resetTimer = () => {
-    setTimerRunning(false);
-    setTimerSec(0);
-  };
+    const id = window.setInterval(syncTimer, 1000);
+    return () => window.clearInterval(id);
+  }, [session.startedAt, session.durationSec, session.completed]);
   const totalStats = useMemo(() => {
     const totalExercises = session.exercises.length;
     const totalSets = session.exercises.reduce((a, e) => a + e.sets.length, 0);
@@ -751,12 +748,43 @@ export function WorkoutView({
   const sessionTypesLabel = session.sessionTypes.length > 0 ? session.sessionTypes.join(", ") : "Uncategorized";
   const nextFocusExercise = session.exercises.find((exercise) => !getExerciseProgress(exercise).goalMet);
   const nextFocusLabel = nextFocusExercise?.name?.trim() || session.exercises[0]?.name?.trim() || "Add an exercise";
+  const sessionStatusLabel = session.completed ? "Saved" : workoutActive ? "In progress" : "Ready to start";
   const formattedSessionDate = new Date(session.dateISO + "T00:00").toLocaleDateString("en-US", {
     weekday: "long",
     year: "numeric",
     month: "long",
     day: "numeric",
   });
+  const formattedRestTimer = formatDuration(restTimerSec);
+
+  const startCurrentWorkout = () => {
+    setSession({
+      ...session,
+      completed: false,
+      durationSec: 0,
+      startedAt: Date.now(),
+      dateISO: toISO(new Date()),
+    });
+    toasts.push('Workout duration started.', 'success');
+  };
+
+  const startBlankWorkout = () => {
+    const hasWorkInProgress = !session.completed && (session.exercises.length > 0 || (session.durationSec || 0) > 0);
+    if (hasWorkInProgress && !window.confirm('Start a new blank workout and replace the current session?')) {
+      return;
+    }
+
+    setSession({
+      sessionName: 'Workout',
+      dateISO: toISO(new Date()),
+      exercises: [],
+      completed: false,
+      sessionTypes: session.sessionTypes.length > 0 ? session.sessionTypes : ['Resistance'],
+      durationSec: 0,
+      startedAt: Date.now(),
+    });
+    toasts.push('Started a new blank workout.', 'success');
+  };
 
   const addExercise = () => {
     setSession({
@@ -765,6 +793,7 @@ export function WorkoutView({
         ...session.exercises,
         { id: crypto.randomUUID(), name: "", minSets: 3, targetReps: 6, intensity: 0, sets: [0, 0, 0], notes: "" },
       ],
+      startedAt: session.startedAt ?? Date.now(),
     });
   };
 
@@ -816,9 +845,12 @@ export function WorkoutView({
       return;
     }
     completedGuards.add(session);
+    const finalDurationSec = session.startedAt
+      ? Math.max(timerSec, Math.floor((Date.now() - session.startedAt) / 1000))
+      : timerSec;
 
     // Mark session as completed in local state
-    setSession({ ...session, completed: true, durationSec: timerSec });
+    setSession({ ...session, completed: true, durationSec: finalDurationSec });
 
     // Play celebration sound for workout completion
     playWorkoutCompletionSound();
@@ -832,7 +864,7 @@ export function WorkoutView({
       if (!uid) {
         console.warn('[WT] completeWorkout: no user id, cannot persist session');
       } else {
-        const payload = { ...session, completed: true, durationSec: timerSec, completedAt: Date.now() };
+        const payload = { ...session, completed: true, durationSec: finalDurationSec, completedAt: Date.now() };
         const docRef = await addDoc(collection(db, 'users', uid, 'sessions'), payload as any);
         const sessionId = docRef.id;
 
@@ -864,7 +896,6 @@ export function WorkoutView({
       console.error('Failed to save completed session', e);
     }
     // stop the timer when completed
-    setTimerRunning(false);
     setTimerSec(0);
 
     // Clear the current workout session to make space for a new one
@@ -1096,9 +1127,9 @@ export function WorkoutView({
 
             <div className="grid w-full gap-3 sm:grid-cols-2 xl:w-[420px]">
               <div className="rounded-3xl bg-white/85 p-4 shadow-sm ring-1 ring-white/70">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Elapsed</div>
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Workout duration</div>
                 <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{formatDuration(timerSec)}</div>
-                <div className="mt-1 text-sm text-slate-500">{timerRunning ? "Timer running" : "Timer paused"}</div>
+                <div className="mt-1 text-sm text-slate-500">{sessionStatusLabel}</div>
               </div>
               <div className="rounded-3xl bg-white/85 p-4 shadow-sm ring-1 ring-white/70">
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Progress</div>
@@ -1121,78 +1152,110 @@ export function WorkoutView({
           </div>
         </CardHeader>
 
-        <CardContent className="grid gap-4 pt-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
-          <div className="rounded-[2rem] bg-slate-950 p-6 text-white shadow-2xl shadow-slate-300/50">
+        <CardContent className="grid items-start gap-4 pt-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+          <div className="self-start rounded-[2rem] bg-gradient-to-br from-slate-800 via-slate-700 to-teal-800 p-5 text-white shadow-2xl shadow-slate-300/50">
             <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
               <div>
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Live timer</div>
-                <div className="mt-3 text-5xl font-semibold tracking-tight">{formatDuration(timerSec)}</div>
-                <div className="mt-2 max-w-md text-sm text-slate-300">
-                  Keep the timer and completion action together so the workout always has a single obvious control point.
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Workout duration</div>
+                <div className="mt-2 text-4xl font-semibold tracking-tight md:text-[2.75rem]">{formatDuration(timerSec)}</div>
+                <div className="mt-2 max-w-md text-sm text-slate-200">
+                  Whole-session elapsed time. Rest timing is separate.
                 </div>
               </div>
-              <div className="rounded-3xl bg-white/10 px-4 py-4 md:min-w-[180px]">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Session status</div>
+              <div className="rounded-3xl bg-white/12 px-4 py-4 md:min-w-[210px]">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Session status</div>
                 <div className="mt-2 text-2xl font-semibold">
-                  {session.completed ? "Completed" : `${completionPercent}% ready`}
+                  {sessionStatusLabel}
                 </div>
-                <div className="mt-1 text-sm text-slate-300">
-                  {completedExercises} of {totalStats.totalExercises} exercises hit their target.
+                <div className="mt-1 text-sm text-slate-200">
+                  {session.completed
+                    ? "Workout session saved."
+                    : `${completedExercises} of ${totalStats.totalExercises} exercises hit their target.`}
                 </div>
               </div>
             </div>
 
-            <div className="mt-6 h-2 overflow-hidden rounded-full bg-white/10">
-              <div className="h-full rounded-full bg-gradient-to-r from-sky-400 via-cyan-300 to-emerald-400 transition-all" style={{ width: `${completionPercent}%` }} />
+            <div className="mt-5 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">
+              <span>Routine goal completion</span>
+              <span>{completionPercent}%</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/15">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-sky-300 via-cyan-200 to-emerald-300 transition-all"
+                style={{ width: `${completionPercent}%` }}
+              />
+            </div>
+            <div className="mt-2 text-sm text-slate-200">
+              {completedExercises} of {totalStats.totalExercises} exercises currently meet their target.
             </div>
 
-            <div className="mt-6 flex flex-wrap gap-3">
-              {!timerRunning ? (
+            <div className="mt-5 flex flex-wrap gap-3">
+              {!workoutActive && !session.completed ? (
                 <Button
-                  onClick={() => setTimerRunning(true)}
-                  className="bg-white text-slate-950 hover:bg-slate-100"
+                  onClick={startCurrentWorkout}
+                  className="bg-white text-slate-900 hover:bg-slate-100"
                 >
                   <Play className="mr-2 h-4 w-4" />
-                  Start timer
+                  Start current workout
                 </Button>
-              ) : (
-                <Button
-                  variant="destructive"
-                  onClick={() => setTimerRunning(false)}
-                  className="bg-rose-500 text-white hover:bg-rose-600"
-                >
-                  <Pause className="mr-2 h-4 w-4" />
-                  Pause timer
-                </Button>
-              )}
+              ) : null}
               <Button
                 variant="outline"
-                onClick={resetTimer}
-                className="border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+                onClick={onOpenRestTimer}
+                className="border-white/20 bg-white/8 text-white hover:bg-white/14 hover:text-white"
               >
-                <RotateCcw className="mr-2 h-4 w-4" />
-                Reset
+                <TimerReset className="mr-2 h-4 w-4" />
+                Rest timer {formattedRestTimer}
               </Button>
-              {!session.completed ? (
-                <Button
-                  onClick={completeWorkout}
-                  className="bg-emerald-500 text-white hover:bg-emerald-600"
-                >
-                  <Check className="mr-2 h-4 w-4" />
-                  Complete workout
-                </Button>
-              ) : (
-                <div className="inline-flex items-center rounded-full bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-300">
+              {session.completed ? (
+                <div className="inline-flex items-center rounded-full bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-100">
                   <Check className="mr-2 h-4 w-4" />
                   Workout completed
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
 
-          <div className="rounded-[2rem] border border-slate-200 bg-white/85 p-6 shadow-sm">
+          <div className="self-start rounded-[2rem] border border-slate-200 bg-white/85 p-6 shadow-sm">
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Session controls</div>
             <div className="mt-5 space-y-4">
+              <div className="rounded-3xl bg-slate-50 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Start options</div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <Button onClick={startBlankWorkout} className="justify-start bg-sky-600 text-white hover:bg-sky-700">
+                    <Plus className="mr-2 h-4 w-4" />
+                    New blank workout
+                  </Button>
+                  <Button variant="outline" onClick={loadRoutines} className="justify-start border-slate-200 bg-white">
+                    <Dumbbell className="mr-2 h-4 w-4" />
+                    Load routine
+                  </Button>
+                </div>
+                <div className="mt-3 text-sm text-slate-600">
+                  Start from scratch or pull in a saved routine here. Adding the first exercise also starts workout duration automatically.
+                </div>
+              </div>
+
+              <div className="rounded-3xl bg-teal-50 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <TimerReset className="h-4 w-4 text-teal-600" />
+                  Rest timer
+                </div>
+                <div className="mt-2 text-2xl font-semibold text-slate-900">{formattedRestTimer}</div>
+                <div className="mt-1 text-sm text-slate-600">
+                  {restTimerRunning
+                    ? 'Rest timer running and separate from workout duration.'
+                    : 'Use it here in Workout Session. Once running, it stays available on other pages too.'}
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={onOpenRestTimer}
+                  className="mt-3 border-teal-200 bg-white text-teal-700 hover:bg-teal-100"
+                >
+                  Open rest timer
+                </Button>
+              </div>
+
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700">Session date</label>
                 <Input
@@ -1204,10 +1267,6 @@ export function WorkoutView({
               </div>
 
               <div className="grid gap-2 sm:grid-cols-2">
-                <Button variant="outline" onClick={loadRoutines} className="justify-start border-slate-200 bg-white">
-                  <Dumbbell className="mr-2 h-4 w-4" />
-                  Load routine
-                </Button>
                 <Button
                   variant="secondary"
                   onClick={saveRoutine}
@@ -1227,7 +1286,7 @@ export function WorkoutView({
                   <Bookmark className={cn('mr-2 h-4 w-4', sessionFavorited && 'fill-yellow-400 text-yellow-500')} />
                   {sessionFavorited ? 'Favorited' : 'Favorite session'}
                 </Button>
-                <Button onClick={addExercise} className="justify-start bg-sky-600 text-white hover:bg-sky-700">
+                <Button onClick={addExercise} className="justify-start bg-sky-600 text-white hover:bg-sky-700 sm:col-span-2">
                   <Plus className="mr-2 h-4 w-4" />
                   Add exercise
                 </Button>
@@ -1318,6 +1377,21 @@ export function WorkoutView({
         </CardContent>
       </Card>
 
+      {workoutActive && !session.completed ? (
+        <div className="fixed bottom-24 right-6 z-40">
+          <Button
+            onClick={completeWorkout}
+            className="h-auto rounded-full bg-emerald-500 px-5 py-3 text-white shadow-xl shadow-emerald-200 hover:bg-emerald-600"
+          >
+            <Check className="mr-3 h-5 w-5" />
+            <span className="flex flex-col items-start leading-tight">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-100">Finish workout</span>
+              <span className="text-sm font-semibold">Save {formatDuration(timerSec)}</span>
+            </span>
+          </Button>
+        </div>
+      ) : null}
+
       {/* Load routine modal */}
       {showLoadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -1342,9 +1416,19 @@ export function WorkoutView({
                 const found = routines.find((x) => x.id === selectedRoutineId);
                 if (!found) return toasts.push('Select a routine', 'info');
                 const exercises = (found.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, intensity: e.intensity || 0, sets: Array(e.minSets).fill(0), notes: e.notes || "" }));
-                setSession({ ...session, sessionName: found.name, exercises, completed: false, sessionTypes: found.sessionTypes || [], durationSec: 0 });
+                setSession({
+                  ...session,
+                  sessionName: found.name,
+                  exercises,
+                  completed: false,
+                  sessionTypes: found.sessionTypes || [],
+                  durationSec: 0,
+                  startedAt: Date.now(),
+                  dateISO: toISO(new Date()),
+                });
                 setShowLoadModal(false);
                 setSelectedRoutineId(null);
+                toasts.push(`Loaded "${found.name}" and started workout duration.`, 'success');
               }}>Load selected</Button>
             </div>
           </div>
