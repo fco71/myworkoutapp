@@ -17,7 +17,6 @@ import {
   Play,
   Dumbbell,
   Activity,
-  TimerReset,
   Trophy,
   Sparkles,
   ListChecks,
@@ -633,18 +632,12 @@ export function WorkoutView({
   weekly,
   setWeekly,
   userName,
-  restTimerSec,
-  restTimerRunning,
-  onOpenRestTimer,
 }: {
   session: ResistanceSession;
   setSession: (s: ResistanceSession) => void;
   weekly: WeeklyPlan;
   setWeekly: (w: WeeklyPlan) => void;
   userName: string | null;
-  restTimerSec: number;
-  restTimerRunning: boolean;
-  onOpenRestTimer: () => void;
 }) {
   const toasts = useToasts();
   const [pendingFavorites, setPendingFavorites] = useState<Set<string>>(new Set());
@@ -755,8 +748,6 @@ export function WorkoutView({
     month: "long",
     day: "numeric",
   });
-  const formattedRestTimer = formatDuration(restTimerSec);
-
   const startCurrentWorkout = () => {
     setSession({
       ...session,
@@ -1199,14 +1190,6 @@ export function WorkoutView({
                   Start current workout
                 </Button>
               ) : null}
-              <Button
-                variant="outline"
-                onClick={onOpenRestTimer}
-                className="border-white/20 bg-white/8 text-white hover:bg-white/14 hover:text-white"
-              >
-                <TimerReset className="mr-2 h-4 w-4" />
-                Rest timer {formattedRestTimer}
-              </Button>
               {session.completed ? (
                 <div className="inline-flex items-center rounded-full bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-100">
                   <Check className="mr-2 h-4 w-4" />
@@ -1234,26 +1217,6 @@ export function WorkoutView({
                 <div className="mt-3 text-sm text-slate-600">
                   Start from scratch or pull in a saved routine here. Adding the first exercise also starts workout duration automatically.
                 </div>
-              </div>
-
-              <div className="rounded-3xl bg-teal-50 p-4">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                  <TimerReset className="h-4 w-4 text-teal-600" />
-                  Rest timer
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-slate-900">{formattedRestTimer}</div>
-                <div className="mt-1 text-sm text-slate-600">
-                  {restTimerRunning
-                    ? 'Rest timer running and separate from workout duration.'
-                    : 'Use it here in Workout Session. Once running, it stays available on other pages too.'}
-                </div>
-                <Button
-                  variant="outline"
-                  onClick={onOpenRestTimer}
-                  className="mt-3 border-teal-200 bg-white text-teal-700 hover:bg-teal-100"
-                >
-                  Open rest timer
-                </Button>
               </div>
 
               <div className="space-y-2">
@@ -1315,7 +1278,7 @@ export function WorkoutView({
           </p>
         </div>
         <div className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm ring-1 ring-slate-200">
-          <TimerReset className="h-4 w-4 text-slate-400" />
+          <Check className="h-4 w-4 text-slate-400" />
           {completedExercises} complete of {totalStats.totalExercises}
         </div>
       </div>

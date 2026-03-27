@@ -762,9 +762,6 @@ export default function WorkoutTrackerApp() {
               weekly={weekly}
               setWeekly={setWeekly}
               userName={userName}
-              restTimerSec={countdownSec}
-              restTimerRunning={countdownRunning}
-              onOpenRestTimer={() => setShowCountdownModal(true)}
             />
           </TabsContent>
 
