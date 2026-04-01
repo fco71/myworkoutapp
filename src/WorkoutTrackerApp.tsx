@@ -828,7 +828,7 @@ export default function WorkoutTrackerApp() {
         {showFloatingRestTimer && (
           <div className="fixed right-6 bottom-6 z-50">
             <div
-              className={`group flex items-center gap-3 rounded-full px-3 py-3 text-white shadow-xl transition-all duration-300 ${
+              className={`group flex items-center rounded-full p-2 text-white shadow-xl transition-all duration-300 ${
               countdownRunning && countdownSec <= 10
                 ? 'bg-red-600 animate-pulse'
                 : countdownRunning
@@ -838,15 +838,16 @@ export default function WorkoutTrackerApp() {
             >
               <button
                 type="button"
-                className="flex h-11 w-11 items-center justify-center rounded-full bg-white/12 transition hover:bg-white/18"
+                className="flex h-11 w-11 items-center justify-center rounded-full bg-white/14 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] transition duration-200 hover:scale-[1.05] hover:bg-white/22 active:scale-[0.98]"
                 onClick={quickStartRestTimer}
                 title={countdownRunning ? 'Restart rest timer' : 'Start rest timer'}
               >
                 <TimerReset className="h-5 w-5" />
               </button>
+              <div className="mx-2 h-8 w-px bg-white/20" />
               <button
                 type="button"
-                className="flex flex-col items-start pr-1 text-left"
+                className="flex flex-col items-start rounded-2xl bg-white/[0.07] px-3 py-2 pr-2 text-left transition duration-200 hover:scale-[1.02] hover:bg-white/[0.14] active:scale-[0.99]"
                 onClick={() => setShowCountdownModal(true)}
                 title="Choose rest time"
               >
