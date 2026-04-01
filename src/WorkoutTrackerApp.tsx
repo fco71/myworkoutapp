@@ -526,6 +526,43 @@ export default function WorkoutTrackerApp() {
   const formattedCountdown = `${Math.floor(countdownSec / 60)}:${String(countdownSec % 60).padStart(2, '0')}`;
   const showFloatingRestTimer = activeTab === 'workout' || countdownRunning;
 
+  const getPreferredRestDuration = () => {
+    try {
+      const raw = localStorage.getItem(LS_COUNTDOWN);
+      if (raw) {
+        const saved = parseInt(raw, 10);
+        if (!isNaN(saved) && saved > 0) return saved;
+      }
+    } catch (e) { /* ignore */ }
+    return 90;
+  };
+
+  const persistRestDuration = (seconds: number) => {
+    try {
+      localStorage.setItem(LS_COUNTDOWN, String(seconds));
+    } catch (e) { /* ignore */ }
+  };
+
+  const quickStartRestTimer = () => {
+    const duration = getPreferredRestDuration();
+    setCountdownSec(duration);
+    setCountdownRunning(true);
+    setShowCountdownModal(false);
+  };
+
+  const startConfiguredRestTimer = () => {
+    if (countdownSec <= 0) return;
+    persistRestDuration(countdownSec);
+    setCountdownRunning(true);
+    setShowCountdownModal(false);
+  };
+
+  const stopRestTimer = () => {
+    setCountdownRunning(false);
+    setCountdownSec(getPreferredRestDuration());
+    setShowCountdownModal(false);
+  };
+
   useEffect(() => {
     if (!countdownRunning) return;
     const id = setInterval(() => {
@@ -790,7 +827,7 @@ export default function WorkoutTrackerApp() {
         {/* Floating countdown button */}
         {showFloatingRestTimer && (
           <div className="fixed right-6 bottom-6 z-50">
-            <button
+            <div
               className={`group flex items-center gap-3 rounded-full px-3 py-3 text-white shadow-xl transition-all duration-300 ${
               countdownRunning && countdownSec <= 10
                 ? 'bg-red-600 animate-pulse'
@@ -798,18 +835,27 @@ export default function WorkoutTrackerApp() {
                   ? 'bg-orange-600'
                   : 'bg-teal-700 hover:bg-teal-800'
               }`}
-              onClick={() => setShowCountdownModal(true)}
             >
-              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-white/12">
+              <button
+                type="button"
+                className="flex h-11 w-11 items-center justify-center rounded-full bg-white/12 transition hover:bg-white/18"
+                onClick={quickStartRestTimer}
+                title={countdownRunning ? 'Restart rest timer' : 'Start rest timer'}
+              >
                 <TimerReset className="h-5 w-5" />
-              </span>
-              <span className="flex flex-col items-start pr-1">
+              </button>
+              <button
+                type="button"
+                className="flex flex-col items-start pr-1 text-left"
+                onClick={() => setShowCountdownModal(true)}
+                title="Choose rest time"
+              >
                 <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/80">Rest timer</span>
                 <span className="text-sm font-semibold">
-                  {countdownRunning ? formattedCountdown : `Ready ${formattedCountdown}`}
+                  {countdownRunning ? formattedCountdown : `Choose ${formattedCountdown}`}
                 </span>
-              </span>
-            </button>
+              </button>
+            </div>
           </div>
         )}
 
@@ -833,7 +879,7 @@ export default function WorkoutTrackerApp() {
                       const minutes = Math.max(0, Math.min(59, parseInt(e.target.value||'0')));
                       const newValue = minutes * 60 + (countdownSec%60);
                       setCountdownSec(newValue);
-                      try { localStorage.setItem(LS_COUNTDOWN, String(newValue)); } catch (e) {}
+                      persistRestDuration(newValue);
                     }
                   }}
                   disabled={countdownRunning}
@@ -851,7 +897,7 @@ export default function WorkoutTrackerApp() {
                       const seconds = Math.min(59, Math.max(0, parseInt(e.target.value||'0')));
                       const newValue = Math.floor(countdownSec/60)*60 + seconds;
                       setCountdownSec(newValue);
-                      try { localStorage.setItem(LS_COUNTDOWN, String(newValue)); } catch (e) {}
+                      persistRestDuration(newValue);
                     }
                   }}
                   disabled={countdownRunning}
@@ -859,28 +905,15 @@ export default function WorkoutTrackerApp() {
               </div>
               <div className="flex gap-2 mt-3 flex-wrap">
                 {[30,60,90,120,180].map(s => (
-                  <Button key={s} variant="outline" onClick={() => { setCountdownSec(s); try { localStorage.setItem(LS_COUNTDOWN, String(s)); } catch (e) {} }} className="flex-shrink-0">{`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`}</Button>
+                  <Button key={s} variant="outline" onClick={() => { setCountdownSec(s); persistRestDuration(s); }} className="flex-shrink-0">{`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`}</Button>
                 ))}
               </div>
               <div className="flex justify-end gap-2 mt-4">
                 <Button variant="outline" onClick={() => { setShowCountdownModal(false); }}>Close</Button>
                 {!countdownRunning ? (
-                  <Button onClick={() => { if (countdownSec>0) { try { localStorage.setItem(LS_COUNTDOWN, String(countdownSec)); } catch (e) {} setCountdownRunning(true); } setShowCountdownModal(false); }}>Start</Button>
+                  <Button onClick={startConfiguredRestTimer}>Start</Button>
                 ) : (
-                  <Button variant="destructive" onClick={() => {
-                    setCountdownRunning(false);
-                    // Restore preferred timer value from localStorage
-                    try {
-                      const raw = localStorage.getItem(LS_COUNTDOWN);
-                      if (raw) {
-                        const saved = parseInt(raw);
-                        if (!isNaN(saved) && saved > 0) {
-                          setCountdownSec(saved);
-                        }
-                      }
-                    } catch (e) { /* ignore */ }
-                    setShowCountdownModal(false);
-                  }}>Stop</Button>
+                  <Button variant="destructive" onClick={stopRestTimer}>Stop</Button>
                 )}
               </div>
             </div>
