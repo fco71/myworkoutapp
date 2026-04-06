@@ -4,7 +4,7 @@ import { doc, setDoc, collection, addDoc, getDocs, deleteDoc, getDoc, collection
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, Check, Edit, Search, Dumbbell, User, Grid3X3, Target, Bookmark, MessageSquare } from "lucide-react";
+import { Plus, Trash2, Check, Edit, Search, Dumbbell, User, Grid3X3, Target, Bookmark, MessageSquare, ChevronDown } from "lucide-react";
 import { ResistanceExercise, ResistanceSession } from "@/types";
 import {
   cn,
@@ -38,6 +38,7 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
   const [filter, setFilter] = useState<'all'|'exercise'|'workout'|'type'|'user'|'favorites'>('all');
   const [filterQuery, setFilterQuery] = useState('');
   const [pendingFavorites, setPendingFavorites] = useState<Set<string>>(new Set());
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const resetComposer = () => { setComposerName(''); setComposerExercises([]); setEditingId(null); };
 
@@ -666,10 +667,14 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                           {it.minSets || 3} sets × {it.targetReps || 8} reps
                         </span>
                       ) : (
-                        <span className="text-sm text-gray-600 flex items-center gap-1">
+                        <button
+                          onClick={() => setExpandedIds(prev => { const n = new Set(prev); n.has(it.id) ? n.delete(it.id) : n.add(it.id); return n; })}
+                          className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                        >
                           <Plus className="h-3 w-3" />
                           {(it.exercises || []).length} exercises
-                        </span>
+                          <ChevronDown className={cn("h-3 w-3 transition-transform", expandedIds.has(it.id) && "rotate-180")} />
+                        </button>
                       )}
                       {it.parentRoutine && (
                         <span className="inline-flex items-center px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">
@@ -851,14 +856,25 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
               </div>
             </div>
           </CardHeader>
-          <CardContent className="pt-0">
-            {/* Only show session types for routines that actually have session types */}
+          <CardContent className="pt-0 space-y-2">
+            {/* Session type badges */}
             {it.kind === 'routine' && (it.sessionTypes || []).length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {(it.sessionTypes || []).map((type: string, idx: number) => (
                   <span key={idx} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
                     {type}
                   </span>
+                ))}
+              </div>
+            )}
+            {/* Expanded exercise list */}
+            {it.kind === 'routine' && expandedIds.has(it.id) && (it.exercises || []).length > 0 && (
+              <div className="border-t border-gray-100 pt-2 space-y-1">
+                {(it.exercises as any[]).map((ex: any, idx: number) => (
+                  <div key={idx} className="flex items-center justify-between text-sm px-2 py-1 rounded hover:bg-gray-50">
+                    <span className="text-gray-800">{ex.name || 'Unnamed'}</span>
+                    <span className="text-gray-400 shrink-0 ml-4">{ex.minSets || 3} × {ex.targetReps || 8}</span>
+                  </div>
                 ))}
               </div>
             )}
