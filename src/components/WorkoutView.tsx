@@ -292,24 +292,36 @@ function ExerciseCard({
       )}
     >
       <CardHeader className="gap-5 border-b border-white/70 bg-white/75 backdrop-blur-sm">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div className="min-w-0 flex-1 space-y-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]",
-                  goalMet ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"
-                )}
-              >
-                {goalMet ? "On target" : "In progress"}
-              </span>
-              <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-                {ex.sets.length} sets tracked
-              </span>
-              {lastWorkout?.sessionDate && (
-                <span className="inline-flex items-center rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700">
-                  Last done {lastWorkout.sessionDate.toLocaleDateString()}
+        <div className="min-w-0 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]",
+                    goalMet ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"
+                  )}
+                >
+                  {goalMet ? "On target" : "In progress"}
                 </span>
+                <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                  {ex.sets.filter(s => (s || 0) > 0).length} of {ex.sets.length} sets logged
+                </span>
+                {lastWorkout?.sessionDate && (
+                  <span className="inline-flex items-center rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700">
+                    Last done {lastWorkout.sessionDate.toLocaleDateString()}
+                  </span>
+                )}
+              </div>
+              {confirmDelete ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-red-600">Remove?</span>
+                  <Button variant="destructive" size="sm" onClick={onDelete}>Yes</Button>
+                  <Button variant="outline" size="sm" onClick={() => setConfirmDelete(false)}>No</Button>
+                </div>
+              ) : (
+                <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)} className="shrink-0 text-slate-400 hover:text-red-500 hover:bg-red-50">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
               )}
             </div>
 
@@ -361,59 +373,14 @@ function ExerciseCard({
                 />
               </div>
             </div>
-          </div>
-
-          <div className="w-full rounded-3xl bg-slate-950/95 p-5 text-white shadow-xl xl:max-w-sm">
-            <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
-              <span>Progress</span>
-              <span>{sum} / {totalTarget}</span>
-            </div>
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/15">
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
               <div
-                className={cn(
-                  "h-full rounded-full transition-all",
-                  goalMet ? "bg-emerald-400" : "bg-sky-400"
-                )}
+                className={cn("h-full rounded-full transition-all", goalMet ? "bg-emerald-400" : "bg-sky-400")}
                 style={{ width: `${progressPercent}%` }}
               />
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-2xl bg-white/10 px-3 py-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-slate-300">Status</div>
-                <div className="mt-1 font-semibold text-white">{goalMet ? "Goal met" : "Keep pushing"}</div>
-              </div>
-              <div className="rounded-2xl bg-white/10 px-3 py-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-slate-300">Volume</div>
-                <div className="mt-1 font-semibold text-white">{ex.sets.length} sets logged</div>
-              </div>
-            </div>
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              {confirmDelete ? (
-                <>
-                  <span className="text-sm font-medium text-rose-200">Remove this exercise?</span>
-                  <Button variant="destructive" size="sm" onClick={onDelete}>
-                    Yes, remove
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white"
-                    onClick={() => setConfirmDelete(false)}
-                  >
-                    Keep it
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white"
-                  onClick={() => setConfirmDelete(true)}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" /> Remove exercise
-                </Button>
-              )}
-            </div>
+            <span className="shrink-0 text-xs tabular-nums text-slate-400">{sum} / {totalTarget} reps</span>
           </div>
         </div>
       </CardHeader>
@@ -727,7 +694,7 @@ export function WorkoutView({
   }, [session.startedAt, session.durationSec, session.completed]);
   const totalStats = useMemo(() => {
     const totalExercises = session.exercises.length;
-    const totalSets = session.exercises.reduce((a, e) => a + e.sets.length, 0);
+    const totalSets = session.exercises.reduce((a, e) => a + e.sets.filter(s => (s || 0) > 0).length, 0);
     const totalReps = session.exercises.reduce((a, e) => a + e.sets.reduce((x, y) => x + (y || 0), 0), 0);
     return { totalExercises, totalSets, totalReps };
   }, [session.exercises]);
