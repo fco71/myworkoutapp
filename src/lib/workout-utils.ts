@@ -189,8 +189,8 @@ export function defaultSession(): ResistanceSession {
     dateISO: toISO(new Date()),
     sessionName: "Workout",
     exercises: [
-      { id: crypto.randomUUID(), name: "Pull-ups", minSets: 3, targetReps: 6, intensity: 0, sets: [0, 0, 0], notes: "" },
-      { id: crypto.randomUUID(), name: "Push-ups", minSets: 3, targetReps: 12, intensity: 0, sets: [0, 0, 0], notes: "" },
+      { id: crypto.randomUUID(), name: "Pull-ups", minSets: 3, targetReps: 6, intensity: "", sets: [0, 0, 0], notes: "" },
+      { id: crypto.randomUUID(), name: "Push-ups", minSets: 3, targetReps: 12, intensity: "", sets: [0, 0, 0], notes: "" },
     ],
     completed: false,
     sessionTypes: ["Resistance"],

@@ -42,7 +42,7 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
 
   const resetComposer = () => { setComposerName(''); setComposerExercises([]); setEditingId(null); };
 
-  const addComposerExercise = () => setComposerExercises(prev => [...prev, { id: crypto.randomUUID(), name: '', minSets: 3, targetReps: 8, intensity: 0, sets: [0,0,0], notes: '' }]);
+  const addComposerExercise = () => setComposerExercises(prev => [...prev, { id: crypto.randomUUID(), name: '', minSets: 3, targetReps: 8, intensity: "", sets: [0,0,0], notes: '' }]);
 
   const editRoutine = (routine: any) => {
     // Only allow editing routines (not individual exercises) and only if user owns them
@@ -753,7 +753,7 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                         size="sm"
                         onClick={() => {
                           // For individual exercises, add them to current session
-                          const exercise = { id: crypto.randomUUID(), name: it.name, minSets: it.minSets || 3, targetReps: it.targetReps || 8, intensity: 0, sets: Array(it.minSets || 3).fill(0), notes: it.notes || "" };
+                          const exercise = { id: crypto.randomUUID(), name: it.name, minSets: it.minSets || 3, targetReps: it.targetReps || 8, intensity: "", sets: Array(it.minSets || 3).fill(0), notes: it.notes || "" };
                           onLoadRoutine({ dateISO: toISO(new Date()), sessionName: 'Current Session', exercises: [exercise], completed: false, sessionTypes: [], durationSec: 0 }, 'append');
                           toasts.push(`Added "${it.name}" to the current workout.`, 'success');
                         }}

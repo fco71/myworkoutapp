@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { auth, db } from "@/lib/firebase";
 import { doc, setDoc, collection, addDoc, getDocs, deleteDoc, getDoc } from "firebase/firestore";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
@@ -78,6 +78,7 @@ function ExerciseCard({
   onDelete: () => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const intensityAutoFilled = useRef(false);
   const setOK = (rep: number) => rep >= ex.targetReps;
   const { sum, totalTarget, goalMet, progressPercent } = getExerciseProgress(ex);
 
@@ -278,6 +279,19 @@ function ExerciseCard({
     }
   }, [ex.name]);
 
+  // Auto-fill intensity from last workout when history loads and none is set yet
+  useEffect(() => {
+    if (intensityAutoFilled.current) return;
+    const lastIntensity = exerciseHistory.lastWorkout?.intensity;
+    if (lastIntensity !== undefined && lastIntensity !== null && lastIntensity !== 0 && lastIntensity !== "") {
+      const current = ex.intensity;
+      if (current === 0 || current === "" || current === undefined) {
+        updateExercise(ex.id, { intensity: String(lastIntensity) });
+        intensityAutoFilled.current = true;
+      }
+    }
+  }, [exerciseHistory.lastWorkout]);
+
   const { lastWorkout, personalRecord, recentWorkouts } = exerciseHistory;
   const hasHistory = lastWorkout || personalRecord || (recentWorkouts && recentWorkouts.length > 0);
   const hasExtendedHistory = Boolean((recentWorkouts && recentWorkouts.length > 1) || personalRecord);
@@ -361,15 +375,12 @@ function ExerciseCard({
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Intensity</label>
                 <Input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   className="h-12 border-slate-200 bg-white text-center text-base font-semibold shadow-sm"
-                  value={ex.intensity || 0}
-                  min={0}
-                  max={999}
-                  placeholder="0"
-                  onChange={(e) =>
-                    updateExercise(ex.id, { intensity: Math.max(0, Math.min(999, parseInt(e.target.value || "0"))) })
-                  }
+                  value={String(ex.intensity ?? "")}
+                  placeholder="e.g. 7 1/3"
+                  onChange={(e) => updateExercise(ex.id, { intensity: e.target.value })}
                 />
               </div>
             </div>
@@ -749,7 +760,7 @@ export function WorkoutView({
       ...session,
       exercises: [
         ...session.exercises,
-        { id: crypto.randomUUID(), name: "", minSets: 3, targetReps: 6, intensity: 0, sets: [0, 0, 0], notes: "" },
+        { id: crypto.randomUUID(), name: "", minSets: 3, targetReps: 6, intensity: "", sets: [0, 0, 0], notes: "" },
       ],
       startedAt: session.startedAt ?? Date.now(),
     });
@@ -1345,7 +1356,7 @@ export function WorkoutView({
               <Button onClick={() => {
                 const found = routines.find((x) => x.id === selectedRoutineId);
                 if (!found) return toasts.push('Select a routine', 'info');
-                const exercises = (found.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, intensity: e.intensity || 0, sets: Array(e.minSets).fill(0), notes: e.notes || "" }));
+                const exercises = (found.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, intensity: e.intensity ?? "", sets: Array(e.minSets).fill(0), notes: e.notes || "" }));
                 setSession({
                   ...session,
                   sessionName: found.name,

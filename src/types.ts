@@ -43,7 +43,7 @@ export type ResistanceExercise = {
   name: string;
   minSets: number;
   targetReps: number;
-  intensity: number;
+  intensity: string | number;
   sets: number[];
   notes: string;
 };
