@@ -808,16 +808,14 @@ export default function WorkoutTrackerApp() {
 
           <TabsContent value="library" className="mt-4">
             <LibraryView userName={userName} onLoadRoutine={(r, mode) => {
-              const startedAt = Date.now();
               if (mode === 'append') {
                 setSession((prev) => ({
                   ...prev,
                   exercises: [...prev.exercises, ...(r.exercises || [])],
-                  startedAt: prev.startedAt ?? startedAt,
                   completed: false,
                 } as ResistanceSession));
               } else {
-                setSession({ ...r, startedAt, durationSec: 0, completed: false });
+                setSession({ ...r, durationSec: 0, completed: false, startedAt: undefined });
               }
               setActiveTab('workout');
             }} />

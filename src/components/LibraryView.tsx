@@ -721,13 +721,13 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                         onClick={() => {
                           const exercises = (it.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, sets: Array(e.minSets).fill(0), notes: e.notes || "" }));
                           onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id });
-                          toasts.push(`Loaded "${it.name}" and opened Workout Session.`, 'success');
+                          toasts.push(`Loaded "${it.name}". Press Start when ready.`, 'success');
                         }}
                         className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-sm"
-                        title="Replace current workout with this routine"
+                        title="Load this routine into your workout session"
                       >
                         <Grid3X3 className="h-3 w-3 mr-1" />
-                        Start This Workout
+                        Load Workout
                       </Button>
                       <Button
                         size="sm"

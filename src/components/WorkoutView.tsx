@@ -750,7 +750,6 @@ export function WorkoutView({
       completed: false,
       sessionTypes: session.sessionTypes.length > 0 ? session.sessionTypes : ['Resistance'],
       durationSec: 0,
-      startedAt: Date.now(),
     });
     toasts.push('Started a new blank workout.', 'success');
   };
@@ -762,7 +761,6 @@ export function WorkoutView({
         ...session.exercises,
         { id: crypto.randomUUID(), name: "", minSets: 3, targetReps: 6, intensity: "", sets: [0, 0, 0], notes: "" },
       ],
-      startedAt: session.startedAt ?? Date.now(),
     });
   };
 
@@ -1097,7 +1095,7 @@ export function WorkoutView({
             <div className="grid w-full gap-3 sm:grid-cols-2 xl:w-[420px]">
               <div className="rounded-3xl bg-white/85 p-4 shadow-sm ring-1 ring-white/70">
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Workout duration</div>
-                <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{formatDuration(timerSec)}</div>
+                <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{session.startedAt ? formatDuration(timerSec) : "--:--"}</div>
                 <div className="mt-1 text-sm text-slate-500">{sessionStatusLabel}</div>
               </div>
               <div className="rounded-3xl bg-white/85 p-4 shadow-sm ring-1 ring-white/70">
@@ -1126,9 +1124,9 @@ export function WorkoutView({
             <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Workout duration</div>
-                <div className="mt-2 text-4xl font-semibold tracking-tight md:text-[2.75rem]">{formatDuration(timerSec)}</div>
+                <div className="mt-2 text-4xl font-semibold tracking-tight md:text-[2.75rem]">{session.startedAt ? formatDuration(timerSec) : "--:--"}</div>
                 <div className="mt-2 max-w-md text-sm text-slate-200">
-                  Whole-session elapsed time. Rest timing is separate.
+                  {session.startedAt ? "Whole-session elapsed time. Rest timing is separate." : "Press Start to begin timing your workout."}
                 </div>
               </div>
               <div className="rounded-3xl bg-white/12 px-4 py-4 md:min-w-[210px]">
@@ -1193,7 +1191,7 @@ export function WorkoutView({
                   </Button>
                 </div>
                 <div className="mt-3 text-sm text-slate-600">
-                  Start from scratch or pull in a saved routine here. Adding the first exercise also starts workout duration automatically.
+                  Start from scratch or pull in a saved routine here. Press Start when you're ready to begin timing.
                 </div>
               </div>
 
