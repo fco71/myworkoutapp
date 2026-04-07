@@ -20,6 +20,7 @@ import {
   Trophy,
   Sparkles,
   ListChecks,
+  X,
 } from "lucide-react";
 import { ResistanceExercise, ResistanceSession, WeeklyPlan } from "@/types";
 import {
@@ -78,6 +79,7 @@ function ExerciseCard({
   onDelete: () => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [notesDraft, setNotesDraft] = useState(ex.notes || "");
   const intensityAutoFilled = useRef(false);
   const setOK = (rep: number) => rep >= ex.targetReps;
   const { sum, totalTarget, goalMet, progressPercent } = getExerciseProgress(ex);
@@ -397,67 +399,56 @@ function ExerciseCard({
       </CardHeader>
 
       <CardContent className="space-y-5 pt-6">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           {ex.sets.map((rep, i) => (
             <div
               key={i}
               className={cn(
-                "rounded-3xl border p-4 shadow-sm transition-all",
-                setOK(rep)
-                  ? "border-emerald-300 bg-emerald-50"
-                  : "border-slate-200 bg-white"
+                "flex items-center gap-3 border-b border-slate-100 px-4 py-2.5 transition-colors",
+                setOK(rep) ? "bg-emerald-50/60" : "hover:bg-slate-50/60"
               )}
             >
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Set {i + 1}</div>
-                  <div className="mt-1 text-sm text-slate-600">Target {ex.targetReps} reps</div>
-                </div>
-                {setOK(rep) && (
-                  <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                    <Check className="mr-1 h-3.5 w-3.5" />
-                    Hit
-                  </span>
-                )}
-              </div>
-
+              <span className="w-8 shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                S{i + 1}
+              </span>
               <Input
                 type="number"
                 className={cn(
-                  "mt-4 h-14 border-2 text-center text-2xl font-semibold shadow-sm",
+                  "h-9 w-20 shrink-0 text-center text-base font-semibold shadow-none",
                   setOK(rep)
-                    ? "border-emerald-300 bg-white text-emerald-900"
+                    ? "border-emerald-200 bg-white text-emerald-800"
                     : "border-slate-200 bg-slate-50 text-slate-900"
                 )}
                 value={rep}
                 onChange={(e) => updateSet(ex.id, i, Math.max(0, parseInt(e.target.value || "0")))}
               />
-
-              <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
-                <span>
-                  Previous {lastWorkout && lastWorkout.sets && lastWorkout.sets[i] !== undefined ? lastWorkout.sets[i] : "--"}
+              <span className="text-xs text-slate-400">/ {ex.targetReps}</span>
+              <div className="flex-1" />
+              {setOK(rep) ? (
+                <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600">
+                  <Check className="h-3 w-3" /> Hit
                 </span>
-                <button
-                  type="button"
-                  className="font-semibold text-rose-600 transition hover:text-rose-700"
-                  onClick={() => removeSet(ex.id, i)}
-                >
-                  Remove
-                </button>
-              </div>
+              ) : rep > 0 ? (
+                <span className="text-xs text-slate-400">{ex.targetReps - rep} to go</span>
+              ) : null}
+              <span className="w-14 text-right text-xs text-slate-400">
+                prev {lastWorkout?.sets?.[i] ?? "--"}
+              </span>
+              <button
+                type="button"
+                onClick={() => removeSet(ex.id, i)}
+                className="text-slate-300 transition hover:text-rose-500"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
           ))}
-
           <button
             type="button"
             onClick={() => addSet(ex.id)}
-            className="flex min-h-[194px] flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-sky-300 bg-sky-50/70 p-4 text-sky-700 transition hover:border-sky-400 hover:bg-sky-100/70"
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-xs font-medium text-sky-600 transition hover:bg-sky-50"
           >
-            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm">
-              <Plus className="h-5 w-5" />
-            </span>
-            <div className="text-sm font-semibold">Add another set</div>
-            <div className="text-xs text-sky-600">Keep the flow without opening more controls.</div>
+            <Plus className="h-3.5 w-3.5" /> Add set
           </button>
         </div>
 
@@ -490,17 +481,35 @@ function ExerciseCard({
           </div>
         )}
 
-        <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
           <div className="mb-3 flex items-center gap-2">
             <MessageSquare className="h-4 w-4 text-slate-500" />
             <span className="text-sm font-semibold text-slate-800">Notes and cues</span>
           </div>
-          <Input
-            placeholder="Add form cues, weight used, or quick reminders for next time"
-            value={ex.notes || ""}
-            onChange={(e) => updateExercise(ex.id, { notes: e.target.value })}
-            className="border-slate-200 bg-slate-50"
-          />
+          <div className="flex gap-2">
+            <Input
+              placeholder="Add form cues, weight used, or quick reminders for next time"
+              value={notesDraft}
+              onChange={(e) => setNotesDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  updateExercise(ex.id, { notes: notesDraft });
+                  e.currentTarget.blur();
+                }
+              }}
+              className="border-slate-200 bg-slate-50"
+            />
+            {notesDraft !== (ex.notes || "") && (
+              <button
+                type="button"
+                onClick={() => updateExercise(ex.id, { notes: notesDraft })}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white shadow-sm transition hover:bg-emerald-600"
+                title="Save note"
+              >
+                <Check className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
 
         {!ex.name.trim() || ex.name === "New exercise" ? (
