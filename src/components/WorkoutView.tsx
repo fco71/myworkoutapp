@@ -494,7 +494,6 @@ function ExerciseCard({
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   updateExercise(ex.id, { notes: notesDraft });
-                  e.currentTarget.blur();
                 }
               }}
               className="border-slate-200 bg-slate-50"
