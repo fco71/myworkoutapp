@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
-import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,84 @@ import { LibraryView } from "@/components/LibraryView";
 (window as any).appAuth = auth;
 (window as any).appDb = db;
 
+const INITIAL_HISTORY_PRIORITY_COUNT = 1;
+const RECENT_HISTORY_PREFETCH_COUNT = 5;
+const HISTORY_LOAD_INCREMENT = 4;
+
+const sortWeeksNewestFirst = (a: WeeklyPlan, b: WeeklyPlan) =>
+  new Date(b.weekOfISO).getTime() - new Date(a.weekOfISO).getTime();
+
+function getWeekNumberFromStart(weekOfISO: string, startMondayISO: string) {
+  const weekMonday = new Date(`${weekOfISO}T00:00:00`);
+  const startMonday = new Date(`${startMondayISO}T00:00:00`);
+  return Math.max(1, Math.floor((weekMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1);
+}
+
+function buildHistoryPlan(programStartDate: string) {
+  const currentMonday = getMonday();
+  const startMonday = getMonday(new Date(`${programStartDate}T00:00:00`));
+  const currentWeekNumber = getWeekNumberFromStart(toISO(currentMonday), toISO(startMonday));
+  const previousWeekIsos = Array.from({ length: Math.max(currentWeekNumber - 1, 0) }, (_unused, index) => {
+    const prevMonday = new Date(currentMonday);
+    prevMonday.setDate(currentMonday.getDate() - (7 * (index + 1)));
+    return toISO(prevMonday);
+  });
+
+  return {
+    currentWeekNumber,
+    startMondayISO: toISO(startMonday),
+    previousWeekIsos,
+  };
+}
+
+function normalizeStoredWeek(rawWeekly: WeeklyPlan, weekOfISO: string, startMondayISO: string) {
+  const normalized = normalizeWeekly({
+    ...rawWeekly,
+    customTypes: ensureUniqueTypes(rawWeekly.customTypes || []),
+    weekOfISO,
+  } as WeeklyPlan);
+
+  return {
+    ...normalized,
+    weekNumber: getWeekNumberFromStart(weekOfISO, startMondayISO),
+  };
+}
+
+async function loadPreviousWeeksBatch(
+  userId: string,
+  weekIsos: string[],
+  startMondayISO: string,
+  fallbackCustomTypes: string[],
+  fallbackTypeCategories: Record<string, string>,
+) {
+  if (weekIsos.length === 0) return [] as WeeklyPlan[];
+
+  const snaps = await Promise.all(
+    weekIsos.map((weekOfISO) => getDoc(doc(db, 'users', userId, 'state', weekOfISO)))
+  );
+
+  return weekIsos.map((weekOfISO, index) => {
+    const snap = snaps[index];
+    if (snap.exists()) {
+      const data = snap.data() as PersistedState;
+      if (data?.weekly) {
+        return normalizeStoredWeek(data.weekly, weekOfISO, startMondayISO);
+      }
+    }
+
+    const emptyWeek = createEmptyWeek(
+      new Date(`${weekOfISO}T00:00:00`),
+      fallbackCustomTypes,
+      fallbackTypeCategories,
+    );
+    return {
+      ...emptyWeek,
+      weekOfISO,
+      weekNumber: getWeekNumberFromStart(weekOfISO, startMondayISO),
+    };
+  }).sort(sortWeeksNewestFirst);
+}
+
 export default function WorkoutTrackerApp() {
   const [weekly, setWeekly] = useState<WeeklyPlan>(defaultWeekly());
 
@@ -49,6 +127,10 @@ export default function WorkoutTrackerApp() {
   const [initialized, setInitialized] = useState(false);
   const [showSignIn, setShowSignIn] = useState(false);
   const [activeTab, setActiveTab] = useState("week");
+  const [historyStartMondayISO, setHistoryStartMondayISO] = useState<string | null>(null);
+  const [historyWeekIsos, setHistoryWeekIsos] = useState<string[]>([]);
+  const [historyRequestedCount, setHistoryRequestedCount] = useState(INITIAL_HISTORY_PRIORITY_COUNT);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // Request notification permissions on app initialization
   useEffect(() => {
@@ -111,25 +193,64 @@ export default function WorkoutTrackerApp() {
       try {
         if (u) {
           setUserId(u.uid);
-          // Load username from Firestore profile, fallback to display name or default
+          setPreviousWeeks([]);
+          setHistoryStartMondayISO(null);
+          setHistoryWeekIsos([]);
+          setHistoryRequestedCount(0);
+          setHistoryLoading(false);
+
+          const alignWeeklyToCurrentWeek = (incomingWeekly: WeeklyPlan, currentMonday: Date, currentWeekISO: string) => {
+            let normalized = normalizeWeekly({
+              ...incomingWeekly,
+              customTypes: ensureUniqueTypes(incomingWeekly.customTypes || []),
+              weekOfISO: currentWeekISO,
+            } as WeeklyPlan);
+
+            const currentWeekDates = weekDates(currentMonday).map(d => toISO(d));
+            const existingDates = normalized.days.map(d => d.dateISO);
+
+            if (!arraysEqual(currentWeekDates, existingDates)) {
+              const newDays = currentWeekDates.map(dateISO => {
+                const existingDay = normalized.days.find(d => d.dateISO === dateISO);
+                return existingDay || {
+                  dateISO,
+                  types: {},
+                  sessions: 0,
+                  sessionsList: [],
+                  comments: {},
+                };
+              });
+              normalized = { ...normalized, days: newDays };
+            }
+
+            if (!normalized.customTypes || normalized.customTypes.length === 0) {
+              const globals = loadGlobalTypes();
+              const categories = loadTypeCategories();
+              normalized = normalizeWeekly({
+                ...normalized,
+                customTypes: globals,
+                typeCategories: { ...(normalized.typeCategories || {}), ...(categories || {}) },
+              } as WeeklyPlan);
+            }
+
+            return normalized;
+          };
+
           try {
             const profileRef = doc(db, 'users', u.uid, 'profile', 'info');
             const profileSnap = await getDoc(profileRef);
             if (profileSnap.exists() && profileSnap.data().username) {
-              const loadedUsername = profileSnap.data().username;
-              setUserName(loadedUsername);
+              setUserName(profileSnap.data().username);
             } else {
-              // No username set yet, use display name as default and save it
               const defaultUsername = u.displayName || u.email?.split('@')[0] || 'User';
               setUserName(defaultUsername);
               await setDoc(profileRef, { username: defaultUsername, email: u.email }, { merge: true });
             }
           } catch (e) {
             console.warn('Failed to load username, using fallback:', e);
-            const fallbackUsername = u.displayName || u.email?.split('@')[0] || 'User';
-            setUserName(fallbackUsername);
+            setUserName(u.displayName || u.email?.split('@')[0] || 'User');
           }
-          // Load program start date FIRST so week number and previous weeks use the correct value (not stale state)
+
           let loadedProgramStartDate = programStartDate;
           try {
             const programRef = doc(db, 'users', u.uid, 'settings', 'program');
@@ -144,282 +265,114 @@ export default function WorkoutTrackerApp() {
           } catch (e) {
             console.warn('[WT] Failed to load program settings first', e);
           }
-          // Prefer per-week document keyed by weekOfISO. Fall back to the legacy 'tracker' doc.
+
+          const historyPlan = buildHistoryPlan(loadedProgramStartDate);
+          setHistoryStartMondayISO(historyPlan.startMondayISO);
+          setHistoryWeekIsos(historyPlan.previousWeekIsos);
+          setHistoryRequestedCount(Math.min(INITIAL_HISTORY_PRIORITY_COUNT, historyPlan.previousWeekIsos.length));
+
+          const currentMonday = getMonday();
+          const currentWeekISO = toISO(currentMonday);
+          let initialPreviousWeeks: WeeklyPlan[] = [];
+          let currentWeeklySnapshot: WeeklyPlan | null = null;
+          let loadedSettingsTypes: string[] = [];
+          let loadedTypeCategories: Record<string, string> = {};
+
           try {
-            const currentMonday = getMonday();
-            const currentWeekISO = toISO(currentMonday);
             const weekRef = doc(db, 'users', u.uid, 'state', currentWeekISO);
             const wSnap = await getDoc(weekRef);
+
             if (wSnap.exists()) {
               const data = wSnap.data() as PersistedState;
               if (data?.weekly) {
-                // Validate that the stored weekOfISO is actually a Monday
-                const storedWeekISO = data.weekly.weekOfISO;
-                const storedDate = new Date(storedWeekISO + 'T00:00:00');
-                const storedDayOfWeek = storedDate.getDay();
-
-                // If stored weekOfISO is not a Monday (day 1), fix it
-                if (storedDayOfWeek !== 1) {
-                  console.warn('[WT] Stored weekOfISO is not a Monday!', {
-                    stored: storedWeekISO,
-                    dayOfWeek: storedDayOfWeek,
-                    shouldBe: currentWeekISO
-                  });
-                  // Force use the correctly calculated Monday
-                  data.weekly.weekOfISO = currentWeekISO;
-                }
-
-                // dedupe types and normalize
-                const uniq = ensureUniqueTypes(data.weekly.customTypes || []);
-                let normalized = normalizeWeekly({ ...data.weekly, customTypes: uniq, weekOfISO: currentWeekISO } as WeeklyPlan);
-
-                // Ensure days array matches current week dates
-                const currentWeekDates = weekDates(currentMonday).map(d => toISO(d));
-                const existingDates = normalized.days.map(d => d.dateISO);
-
-                if (!arraysEqual(currentWeekDates, existingDates)) {
-                  // Create new days array with current week dates, preserving existing data where possible
-                  const newDays = currentWeekDates.map(dateISO => {
-                    const existingDay = normalized.days.find(d => d.dateISO === dateISO);
-                    return existingDay || {
-                      dateISO,
-                      types: {},
-                      sessions: 0,
-                      sessionsList: [],
-                      comments: {}
-                    };
-                  });
-                  normalized = { ...normalized, days: newDays };
-                }
-
-                  // if the loaded weekly has no customTypes, merge defaults from local/global settings
-                  if (!normalized.customTypes || normalized.customTypes.length === 0) {
-                    const globals = loadGlobalTypes();
-                    const categories = loadTypeCategories();
-                    normalized = normalizeWeekly({ ...normalized, customTypes: globals, typeCategories: { ...(normalized.typeCategories||{}), ...(categories||{}) } } as WeeklyPlan);
-                  }
-                  // Always attempt to reconstruct sessionsList from users/{uid}/sessions collection
-                  try {
-                    const snaps = await getDocs(collection(db, 'users', u.uid, 'sessions'));
-                    const items = snaps.docs.map(s => ({ id: s.id, ...(s.data() as any) }));
-                      if (items.length > 0) {
-                      // build map dateISO -> sessions
-                      const dateMap: Record<string, any[]> = {};
-                      normalized.days.forEach(d => { dateMap[d.dateISO] = []; });
-                      items.forEach(it => {
-                        // try multiple fields for a date
-                        let d: string | null = null;
-                        if (it.dateISO) d = it.dateISO;
-                        else if (it.date) d = it.date;
-                        else if (it.completedAt) d = toISO(new Date(it.completedAt));
-                        else if (it.createdAt) d = toISO(new Date(it.createdAt));
-                        else if (it.ts) d = toISO(new Date(it.ts));
-                        // fallback: if no date fields, try parsing payload
-                        if (!d && it.timestamp) d = toISO(new Date(it.timestamp));
-                        if (!d) {
-                          try { d = toISO(new Date(it)); } catch { d = null; }
-                        }
-                        if (d && dateMap[d]) {
-                          dateMap[d].push(it);
-                        }
-                      });
-                      const days = normalized.days.map(d => ({ ...d, sessionsList: (dateMap[d.dateISO] || []).map(s => ({ id: s.id, sessionTypes: s.sessionTypes || [] })), sessions: (dateMap[d.dateISO] || []).length }));
-                      normalized = { ...normalized, days };
-                      // persist reconstructed weekly so subsequent loads use sessionsList
-                      // Persist reconstructed weekly removed per app decision (weekly doc is authoritative)
-                    }
-                  } catch (e) {
-                    console.warn('[WT] Failed to reconstruct sessionsList from sessions collection', e);
-                  }
-                  setWeekly(normalized);
-
-                  // Load multiple previous weeks for benchmark display
-                  try {
-                    const prevWeeksData: WeeklyPlan[] = [];
-                    const currentMonday = getMonday();
-
-                    // Load all previous weeks since program start (no limit)
-                    const startDate = new Date(loadedProgramStartDate + 'T00:00:00');
-                    const startMonday = getMonday(startDate);
-                    const currentWeekNumber = Math.floor((currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
-                    // Always load at least 12 previous weeks so history is never empty (even when "Week 1")
-                    const weeksToLoad = Math.max(currentWeekNumber - 1, 12);
-
-                    // Get customTypes from current week to use for empty weeks
-                    const currentCustomTypes = normalized.customTypes || [];
-                    const currentTypeCategories = normalized.typeCategories || {};
-
-                    for (let i = 1; i <= weeksToLoad; i++) {
-                      const prevMonday = new Date(currentMonday);
-                      prevMonday.setDate(currentMonday.getDate() - (7 * i)); // Go back i weeks
-                      const prevMondayISO = toISO(prevMonday);
-
-
-                      const prevWeekRef = doc(db, 'users', u.uid, 'state', prevMondayISO);
-                      const prevSnap = await getDoc(prevWeekRef);
-
-                      if (prevSnap.exists()) {
-                        const prevData = prevSnap.data() as PersistedState;
-
-                        if (prevData?.weekly) {
-                          const prevUniq = ensureUniqueTypes(prevData.weekly.customTypes || []);
-                          const prevNormalized = normalizeWeekly({ ...prevData.weekly, customTypes: prevUniq } as WeeklyPlan);
-                          prevWeeksData.push(prevNormalized);
-                        } else {
-                          // Document exists but no weekly data - create empty week structure
-                          const emptyWeek = createEmptyWeek(prevMonday, currentCustomTypes, currentTypeCategories);
-                          prevWeeksData.push(emptyWeek);
-                        }
-                      } else {
-                        // No document exists - create empty week structure so all weeks show in history
-                        const emptyWeek = createEmptyWeek(prevMonday, currentCustomTypes, currentTypeCategories);
-                        prevWeeksData.push(emptyWeek);
-                      }
-                    }
-
-                    // Sort by date descending (most recent first) then assign sequential week numbers
-                    prevWeeksData.sort((a, b) => new Date(b.weekOfISO).getTime() - new Date(a.weekOfISO).getTime());
-
-                    // Assign week numbers to previous weeks based on their date (already calculated above)
-                    prevWeeksData.forEach((weekData) => {
-                      const weekMonday = new Date(weekData.weekOfISO + 'T00:00:00');
-                      weekData.weekNumber = Math.floor((weekMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
-                    });
-
-                    // Update current week number
-                    setWeekly(prev => ({ ...prev, weekNumber: currentWeekNumber }));
-
-                    setPreviousWeeks(prevWeeksData);
-                  } catch (e) {
-                    console.warn('[WT] Failed to load previous weeks data', e);
-                    // Do not clear previousWeeks on error - avoids wiping history on transient failures
-                  }
+                const normalized = {
+                  ...alignWeeklyToCurrentWeek(data.weekly, currentMonday, currentWeekISO),
+                  weekNumber: historyPlan.currentWeekNumber,
+                };
+                currentWeeklySnapshot = normalized;
+                setWeekly(normalized);
               }
               if (data?.session) setSession(data.session);
             } else {
-
-              // Try to load previous week's benchmarks automatically
-              const prevMonday = new Date(currentMonday);
-              prevMonday.setDate(currentMonday.getDate() - 7);
-              const prevISO = toISO(prevMonday);
-
-              let benchmarksFromPrevWeek = {};
+              const previousWeekISO = historyPlan.previousWeekIsos[0];
+              let benchmarksFromPrevWeek: Record<string, number> = {};
               let customTypesFromPrevWeek: string[] = [];
 
-              try {
-                const prevWeekRef = doc(db, 'users', u.uid, 'state', prevISO);
-                const prevSnap = await getDoc(prevWeekRef);
-                if (prevSnap.exists()) {
-                  const prevData = prevSnap.data() as PersistedState;
-                  if (prevData?.weekly) {
-                    benchmarksFromPrevWeek = prevData.weekly.benchmarks || {};
-                    customTypesFromPrevWeek = prevData.weekly.customTypes || [];
+              if (previousWeekISO) {
+                try {
+                  const prevWeekRef = doc(db, 'users', u.uid, 'state', previousWeekISO);
+                  const prevSnap = await getDoc(prevWeekRef);
+                  if (prevSnap.exists()) {
+                    const prevData = prevSnap.data() as PersistedState;
+                    if (prevData?.weekly) {
+                      benchmarksFromPrevWeek = prevData.weekly.benchmarks || {};
+                      customTypesFromPrevWeek = prevData.weekly.customTypes || [];
+                      initialPreviousWeeks = [
+                        normalizeStoredWeek(prevData.weekly, previousWeekISO, historyPlan.startMondayISO),
+                      ];
+                    }
                   }
+                } catch (e) {
+                  console.warn('[WT] Failed to auto-copy from previous week:', e);
                 }
-              } catch (e) {
-                console.warn('[WT] Failed to auto-copy from previous week:', e);
               }
 
-              // Check legacy tracker doc as fallback
               const ref = doc(db, "users", u.uid, "state", "tracker");
               const snap = await getDoc(ref);
+
               if (snap.exists()) {
                 const data = snap.data() as PersistedState;
                 if (data?.weekly) {
-                  // Apply same week correction logic as current week loading
-                  const normalized = normalizeWeekly({
-                    ...data.weekly,
-                    benchmarks: Object.keys(benchmarksFromPrevWeek).length > 0 ? benchmarksFromPrevWeek : data.weekly.benchmarks,
-                    customTypes: customTypesFromPrevWeek.length > 0 ? ensureUniqueTypes(customTypesFromPrevWeek) : ensureUniqueTypes(data.weekly.customTypes || []),
-                    weekOfISO: currentWeekISO // Force current week ISO
-                  } as WeeklyPlan);
+                  const normalized = {
+                    ...alignWeeklyToCurrentWeek({
+                      ...data.weekly,
+                      benchmarks: Object.keys(benchmarksFromPrevWeek).length > 0 ? benchmarksFromPrevWeek : data.weekly.benchmarks,
+                      customTypes: customTypesFromPrevWeek.length > 0
+                        ? ensureUniqueTypes(customTypesFromPrevWeek)
+                        : ensureUniqueTypes(data.weekly.customTypes || []),
+                      weekOfISO: currentWeekISO,
+                    } as WeeklyPlan, currentMonday, currentWeekISO),
+                    weekNumber: historyPlan.currentWeekNumber,
+                  };
 
-                  // Ensure days array matches current week dates
-                  const currentWeekDates = weekDates(currentMonday).map(d => toISO(d));
-                  const existingDates = normalized.days.map(d => d.dateISO);
-
-                  if (!arraysEqual(currentWeekDates, existingDates)) {
-                    // Create new days array with current week dates, preserving existing data where possible
-                    const newDays = currentWeekDates.map(dateISO => {
-                      const existingDay = normalized.days.find(d => d.dateISO === dateISO);
-                      return existingDay || {
-                        dateISO,
-                        types: {},
-                        sessions: 0,
-                        sessionsList: [],
-                        comments: {}
-                      };
-                    });
-                    normalized.days = newDays;
-                  }
-
+                  currentWeeklySnapshot = normalized;
                   setWeekly(normalized);
                 }
                 if (data?.session) setSession(data.session);
               } else {
                 const defaultWk = defaultWeekly();
-                // Apply auto-copied benchmarks and types if available
                 if (Object.keys(benchmarksFromPrevWeek).length > 0 || customTypesFromPrevWeek.length > 0) {
                   defaultWk.benchmarks = benchmarksFromPrevWeek;
                   defaultWk.customTypes = customTypesFromPrevWeek;
                 }
-                setWeekly(defaultWk);
 
-                // Save the new week with auto-copied benchmarks to Firestore
+                const normalizedDefault = normalizeWeekly({
+                  ...defaultWk,
+                  weekOfISO: currentWeekISO,
+                  weekNumber: historyPlan.currentWeekNumber,
+                } as WeeklyPlan);
+
+                currentWeeklySnapshot = normalizedDefault;
+                setWeekly(normalizedDefault);
+
                 if (Object.keys(benchmarksFromPrevWeek).length > 0 || customTypesFromPrevWeek.length > 0) {
                   try {
                     await setDoc(doc(db, 'users', u.uid, 'state', currentWeekISO), {
                       weekly: {
                         benchmarks: benchmarksFromPrevWeek,
-                        customTypes: customTypesFromPrevWeek
-                      }
+                        customTypes: customTypesFromPrevWeek,
+                      },
                     }, { merge: true });
                   } catch (e) {
                     console.warn('[WT] Failed to auto-save benchmarks:', e);
                   }
                 }
               }
-              // Load previous weeks when current week doc was missing, so history is never empty
-              try {
-                const startDate = new Date(loadedProgramStartDate + 'T00:00:00');
-                const startMonday = getMonday(startDate);
-                const currentWeekNumber = Math.max(1, Math.floor((currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1);
-                const weeksToLoad = Math.max(currentWeekNumber - 1, 12);
-                const currentCustomTypes = customTypesFromPrevWeek.length > 0 ? customTypesFromPrevWeek : loadGlobalTypes();
-                const currentTypeCategories = loadTypeCategories();
-                const prevWeeksData: WeeklyPlan[] = [];
-                for (let i = 1; i <= weeksToLoad; i++) {
-                  const weekMonday = new Date(currentMonday);
-                  weekMonday.setDate(currentMonday.getDate() - (7 * i));
-                  const prevWeekRef = doc(db, 'users', u.uid, 'state', toISO(weekMonday));
-                  const prevSnap = await getDoc(prevWeekRef);
-                  if (prevSnap.exists()) {
-                    const prevData = prevSnap.data() as PersistedState;
-                    if (prevData?.weekly) {
-                      const prevUniq = ensureUniqueTypes(prevData.weekly.customTypes || []);
-                      prevWeeksData.push(normalizeWeekly({ ...prevData.weekly, customTypes: prevUniq } as WeeklyPlan));
-                    } else {
-                      prevWeeksData.push(createEmptyWeek(weekMonday, currentCustomTypes, currentTypeCategories));
-                    }
-                  } else {
-                    prevWeeksData.push(createEmptyWeek(weekMonday, currentCustomTypes, currentTypeCategories));
-                  }
-                }
-                prevWeeksData.sort((a, b) => new Date(b.weekOfISO).getTime() - new Date(a.weekOfISO).getTime());
-                prevWeeksData.forEach((weekData) => {
-                  const weekMonday = new Date(weekData.weekOfISO + 'T00:00:00');
-                  weekData.weekNumber = Math.floor((weekMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
-                });
-                setPreviousWeeks(prevWeeksData);
-                setWeekly(prev => ({ ...prev, weekNumber: currentWeekNumber }));
-              } catch (e) {
-                console.warn('[WT] Failed to load previous weeks (no current week path)', e);
-              }
             }
           } catch (e) {
             console.warn('Failed to load per-week state, falling back to tracker', e);
           }
-          // load global types from Firestore if present
+
           try {
             const settingsRef = doc(db, 'users', u.uid, 'settings', 'types');
             const sSnap = await getDoc(settingsRef);
@@ -428,39 +381,69 @@ export default function WorkoutTrackerApp() {
               const t = data?.types;
               const cats = data?.categories || data?.typeCategories || {};
               if (Array.isArray(t) && t.length > 0) {
-                  const custom = ensureUniqueTypes(t);
-                  // Only apply global types to weekly state if the weekly has no custom types yet
-                  setWeekly((prev) => {
-                    if (prev.customTypes && prev.customTypes.length > 0) return prev;
-                    return normalizeWeekly({ ...prev, customTypes: custom, typeCategories: { ...(prev.typeCategories || {}), ...(cats || {}) } } as WeeklyPlan);
-                  });
+                const custom = ensureUniqueTypes(t);
+                loadedSettingsTypes = custom;
+                loadedTypeCategories = cats || {};
+                setWeekly((prev) => {
+                  if (prev.customTypes && prev.customTypes.length > 0) return prev;
+                  return normalizeWeekly({
+                    ...prev,
+                    customTypes: custom,
+                    typeCategories: { ...(prev.typeCategories || {}), ...(cats || {}) },
+                  } as WeeklyPlan);
+                });
               } else if (cats && Object.keys(cats).length > 0) {
-                  // if only categories present, merge into weekly (never overwrite existing categories blindly)
-                  setWeekly((prev) => {
-                    const updated = { ...prev, typeCategories: { ...(prev.typeCategories || {}), ...(cats || {}) } } as WeeklyPlan;
-                    return normalizeWeekly(updated);
-                  });
+                loadedTypeCategories = cats;
+                setWeekly((prev) => normalizeWeekly({
+                  ...prev,
+                  typeCategories: { ...(prev.typeCategories || {}), ...(cats || {}) },
+                } as WeeklyPlan));
               }
             }
           } catch (e) {
             console.warn('Failed to load settings/types from Firestore', e);
           }
-          // load program settings (start date)
-          try {
-            const programRef = doc(db, 'users', u.uid, 'settings', 'program');
-            const pSnap = await getDoc(programRef);
-            if (pSnap.exists()) {
-              const data = pSnap.data() as any;
-              if (data?.programStartDate) setProgramStartDate(data.programStartDate);
-            }
-          } catch (e) {
-            console.warn('Failed to load program settings from Firestore', e);
+
+          if (!currentWeeklySnapshot) {
+            const fallbackWeekly = normalizeWeekly({
+              ...defaultWeekly(),
+              weekOfISO: currentWeekISO,
+              weekNumber: historyPlan.currentWeekNumber,
+            } as WeeklyPlan);
+            currentWeeklySnapshot = fallbackWeekly;
+            setWeekly(fallbackWeekly);
           }
-          // finished initial load; enable autosave
+
+          if (initialPreviousWeeks.length === 0 && historyPlan.previousWeekIsos.length > 0) {
+            try {
+              const fallbackCustomTypes = currentWeeklySnapshot.customTypes.length > 0
+                ? currentWeeklySnapshot.customTypes
+                : loadedSettingsTypes;
+              const fallbackTypeCategories = Object.keys(currentWeeklySnapshot.typeCategories || {}).length > 0
+                ? currentWeeklySnapshot.typeCategories
+                : loadedTypeCategories;
+              initialPreviousWeeks = await loadPreviousWeeksBatch(
+                u.uid,
+                historyPlan.previousWeekIsos.slice(0, INITIAL_HISTORY_PRIORITY_COUNT),
+                historyPlan.startMondayISO,
+                fallbackCustomTypes,
+                fallbackTypeCategories,
+              );
+            } catch (e) {
+              console.warn('[WT] Failed to load recent history', e);
+            }
+          }
+
+          setPreviousWeeks(initialPreviousWeeks);
           setInitialized(true);
         } else {
           setUserId(null);
           setUserName(null);
+          setPreviousWeeks([]);
+          setHistoryStartMondayISO(null);
+          setHistoryWeekIsos([]);
+          setHistoryRequestedCount(0);
+          setHistoryLoading(false);
           setInitialized(false);
         }
       } finally {
@@ -469,6 +452,82 @@ export default function WorkoutTrackerApp() {
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (!userId || !initialized) return;
+    if (activeTab === 'history') {
+      setHistoryRequestedCount(historyWeekIsos.length);
+      return;
+    }
+
+    const preferredCount = Math.min(RECENT_HISTORY_PREFETCH_COUNT, historyWeekIsos.length);
+    setHistoryRequestedCount((prev) => Math.max(prev, preferredCount));
+  }, [activeTab, historyWeekIsos.length, initialized, userId]);
+
+  useEffect(() => {
+    if (!userId || !initialized || !historyStartMondayISO) return;
+    if (historyRequestedCount <= previousWeeks.length) return;
+    if (historyWeekIsos.length === 0 || historyLoading) return;
+
+    let cancelled = false;
+
+    const loadRequestedHistory = async () => {
+      setHistoryLoading(true);
+      try {
+        const targetWeekIsos = historyWeekIsos.slice(0, historyRequestedCount);
+        const existingWeekIsos = new Set(previousWeeks.map((week) => week.weekOfISO));
+        const missingWeekIsos = targetWeekIsos.filter((weekOfISO) => !existingWeekIsos.has(weekOfISO));
+
+        if (missingWeekIsos.length === 0) return;
+
+        const loadedWeeks = await loadPreviousWeeksBatch(
+          userId,
+          missingWeekIsos,
+          historyStartMondayISO,
+          weekly.customTypes || [],
+          weekly.typeCategories || {},
+        );
+
+        if (cancelled) return;
+
+        setPreviousWeeks((prev) => {
+          const merged = new Map(prev.map((week) => [week.weekOfISO, week]));
+          loadedWeeks.forEach((week) => {
+            merged.set(week.weekOfISO, week);
+          });
+          return Array.from(merged.values()).sort(sortWeeksNewestFirst);
+        });
+      } catch (e) {
+        if (!cancelled) {
+          console.warn('[WT] Failed to load additional history', e);
+        }
+      } finally {
+        if (!cancelled) {
+          setHistoryLoading(false);
+        }
+      }
+    };
+
+    loadRequestedHistory();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    historyLoading,
+    historyRequestedCount,
+    historyStartMondayISO,
+    historyWeekIsos,
+    initialized,
+    previousWeeks,
+    userId,
+    weekly.customTypes,
+    weekly.typeCategories,
+  ]);
+
+  const loadMoreHistory = () => {
+    setHistoryRequestedCount((prev) => Math.min(historyWeekIsos.length, prev + HISTORY_LOAD_INCREMENT));
+  };
 
   // Initialize audio context on user interaction
   useEffect(() => {
@@ -764,6 +823,9 @@ export default function WorkoutTrackerApp() {
         {/* Weekly Benchmark Stack - Previous weeks as collapsible benchmark charts */}
         <WeeklyBenchmarkStack
           previousWeeks={previousWeeks}
+          totalWeeks={historyWeekIsos.length}
+          loadingMore={historyLoading}
+          onLoadMore={loadMoreHistory}
           onUpdateWeek={async (week) => {
             try {
               if (!userId) {

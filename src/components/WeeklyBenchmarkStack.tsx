@@ -205,14 +205,18 @@ function PreviousWeekTracker({
 // Weekly Benchmark Stack Component - shows previous weeks using the actual WeeklyTracker format
 export function WeeklyBenchmarkStack({
   previousWeeks,
+  totalWeeks,
+  loadingMore,
+  onLoadMore,
   onUpdateWeek
 }: {
   previousWeeks: WeeklyPlan[];
+  totalWeeks: number;
+  loadingMore: boolean;
+  onLoadMore: () => void;
   onUpdateWeek: (week: WeeklyPlan) => void;
 }) {
   const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set());
-  const [visibleCount, setVisibleCount] = useState(24); // Show 24 weeks at a time
-
 
   const toggleWeek = (weekNumber: number) => {
     const newExpanded = new Set(expandedWeeks);
@@ -223,14 +227,7 @@ export function WeeklyBenchmarkStack({
     }
     setExpandedWeeks(newExpanded);
   };
-
-  const loadMore = () => {
-    setVisibleCount(prev => prev + 24);
-  };
-
-  // Get visible weeks (most recent first)
-  const visibleWeeks = previousWeeks.slice(0, visibleCount);
-  const hasMore = previousWeeks.length > visibleCount;
+  const hasMore = previousWeeks.length < totalWeeks;
 
   // Calculate week stats for summary
   const calculateWeekStats = (weekly: WeeklyPlan) => {
@@ -281,7 +278,7 @@ export function WeeklyBenchmarkStack({
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-xl font-semibold text-gray-800">Previous Weeks</h3>
         <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-          {previousWeeks.length} weeks
+          {totalWeeks > 0 ? `${previousWeeks.length} of ${totalWeeks} weeks` : `${previousWeeks.length} weeks`}
         </span>
       </div>
 
@@ -328,7 +325,7 @@ export function WeeklyBenchmarkStack({
         </Card>
       )}
 
-      {visibleWeeks.map((week, index) => {
+      {previousWeeks.map((week, index) => {
         const isExpanded = expandedWeeks.has(week.weekNumber || index);
         const stats = calculateWeekStats(week);
 
@@ -390,11 +387,12 @@ export function WeeklyBenchmarkStack({
       {hasMore && (
         <div className="flex justify-center pt-6">
           <Button
-            onClick={loadMore}
+            onClick={onLoadMore}
             variant="outline"
             className="px-8 py-3 text-base"
+            disabled={loadingMore}
           >
-            Load More ({previousWeeks.length - visibleCount} older weeks)
+            {loadingMore ? 'Loading older weeks...' : `Load More (${totalWeeks - previousWeeks.length} older weeks)`}
           </Button>
         </div>
       )}
