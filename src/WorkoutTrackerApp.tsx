@@ -648,7 +648,7 @@ export default function WorkoutTrackerApp() {
   }, [countdownRunning]);
 
   return (
-  <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 text-slate-900 p-6 relative z-10">
+  <div className="relative z-10 min-h-screen overflow-x-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 px-4 py-6 text-slate-900 sm:p-6">
       {/* Mindfulness overlay when weekly Mindfulness goal met */}
       {(() => {
         try {
@@ -674,17 +674,17 @@ export default function WorkoutTrackerApp() {
         } catch (e) { /* ignore */ }
         return null;
       })()}
-      <div className="mx-auto max-w-6xl">
+      <div className="mx-auto w-full max-w-6xl min-w-0">
         {/* celebration UI removed */}
   <ToastContainer messages={appToasts.messages} onDismiss={appToasts.dismiss} />
         <header className="mb-8">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+          <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-3xl font-bold text-transparent sm:text-4xl">
                 Lifestyle Tracker
               </h1>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2 self-start">
               {userId ? (
                 <>
                   {/* User Dropdown Menu */}
@@ -803,11 +803,11 @@ export default function WorkoutTrackerApp() {
         </header>
 
         <Tabs defaultValue="week" value={activeTab} onValueChange={setActiveTab} className="">
-          <TabsList className="grid grid-cols-4 w-full md:w-auto bg-white/80 backdrop-blur-sm border border-slate-200 shadow-sm">
-            <TabsTrigger value="week" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">Weekly Tracker</TabsTrigger>
-            <TabsTrigger value="workout" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">Workout Session</TabsTrigger>
-            <TabsTrigger value="history" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">History</TabsTrigger>
-            <TabsTrigger value="library" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">Library</TabsTrigger>
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-1 overflow-hidden rounded-xl border border-slate-200 bg-white/80 p-1 shadow-sm backdrop-blur-sm sm:grid-cols-4 md:w-auto">
+            <TabsTrigger value="week" className="min-h-[3rem] px-2 py-2 text-center text-xs leading-tight data-[state=active]:bg-blue-500 data-[state=active]:text-white sm:text-sm sm:!whitespace-nowrap !whitespace-normal">Weekly Tracker</TabsTrigger>
+            <TabsTrigger value="workout" className="min-h-[3rem] px-2 py-2 text-center text-xs leading-tight data-[state=active]:bg-blue-500 data-[state=active]:text-white sm:text-sm sm:!whitespace-nowrap !whitespace-normal">Workout Session</TabsTrigger>
+            <TabsTrigger value="history" className="min-h-[3rem] px-2 py-2 text-center text-xs leading-tight data-[state=active]:bg-blue-500 data-[state=active]:text-white sm:text-sm sm:!whitespace-nowrap !whitespace-normal">History</TabsTrigger>
+            <TabsTrigger value="library" className="min-h-[3rem] px-2 py-2 text-center text-xs leading-tight data-[state=active]:bg-blue-500 data-[state=active]:text-white sm:text-sm sm:!whitespace-nowrap !whitespace-normal">Library</TabsTrigger>
           </TabsList>
 
       <TabsContent value="week" className="mt-4">

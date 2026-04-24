@@ -254,21 +254,21 @@ export function WeeklyTracker({
   }`;
 
   return (
-    <Card className="bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
-      <CardHeader className="flex items-center justify-between bg-gradient-to-r from-slate-50 to-blue-50">
-        <div>
-          <CardTitle className="text-2xl font-bold text-slate-800">
+    <Card className="overflow-hidden bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
+      <CardHeader className="flex flex-col gap-4 bg-gradient-to-r from-slate-50 to-blue-50 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <CardTitle className="text-2xl font-bold text-slate-800 sm:text-2xl">
             Week of {prettyRange}
             {weekly.weekNumber && (
-              <span className="ml-3 text-lg font-normal text-slate-600">
+              <span className="mt-1 block text-base font-normal text-slate-600 sm:ml-3 sm:mt-0 sm:inline sm:text-lg">
                 (Week {weekly.weekNumber})
               </span>
             )}
           </CardTitle>
           <p className="text-sm text-slate-600">Click cells to toggle what you did each day.</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => {
+        <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end">
+          <Button variant="outline" className="w-full sm:w-auto" onClick={() => {
             // Reset to current week
             const currentMon = getMonday();
             const currentWeekISO = toISO(currentMon);
@@ -301,10 +301,10 @@ export function WeeklyTracker({
               await setDoc(doc(db, 'users', uid, 'state', weekly.weekOfISO), { weekly: { benchmarks: weekly.benchmarks, customTypes: weekly.customTypes } }, { merge: true });
               push?.('Weekly settings saved', 'success');
             } catch (e) { console.error('Save settings failed', e); push?.('Failed to save settings', 'error'); }
-          }} className="bg-white hover:bg-slate-50">
+          }} className="w-full bg-white hover:bg-slate-50 sm:w-auto">
             <Save className="mr-2 h-4 w-4" /> Save settings
           </Button>
-          <Button variant="outline" onClick={() => setShowProgramSettings(true)}>
+          <Button variant="outline" className="w-full sm:w-auto" onClick={() => setShowProgramSettings(true)}>
             Program Settings
           </Button>
           {previousWeeks.length > 0 && (() => {
@@ -314,7 +314,7 @@ export function WeeklyTracker({
             const hasBenchmarks = Object.values(lastWeek.benchmarks || {}).some(v => (v as number) > 0);
             if (!hasBenchmarks) return null;
             return (
-              <Button variant="outline" onClick={() => {
+              <Button variant="outline" className="w-full sm:w-auto" onClick={() => {
                 const updated = { ...weekly, benchmarks: { ...weekly.benchmarks, ...lastWeek.benchmarks } };
                 setWeekly(updated);
                 push?.('Benchmarks copied from last week', 'success');
@@ -335,15 +335,15 @@ export function WeeklyTracker({
         <details className="mt-4" open={typesPanelOpen}>
           <summary className="cursor-pointer text-sm font-semibold mb-2">Manage lifestyle types</summary>
           <div className="mt-2">
-            <div className="flex gap-2 items-center mb-2">
-              <Input value={newTypeName} onChange={(e) => setNewTypeName(e.target.value)} placeholder="New type name" />
-              <select value={newTypeCategory} onChange={(e) => setNewTypeCategory(e.target.value)} className="border rounded px-2 py-1">
+            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Input value={newTypeName} onChange={(e) => setNewTypeName(e.target.value)} placeholder="New type name" className="w-full" />
+              <select value={newTypeCategory} onChange={(e) => setNewTypeCategory(e.target.value)} className="w-full rounded border px-2 py-2 sm:w-auto">
                 <option>None</option>
                 <option>Cardio</option>
                 <option>Resistance</option>
                 <option>Mindfulness</option>
               </select>
-              <Button onClick={addType} className="ml-2"><Plus className="mr-2 h-4 w-4"/> Add Type</Button>
+              <Button onClick={addType} className="w-full sm:ml-2 sm:w-auto"><Plus className="mr-2 h-4 w-4"/> Add Type</Button>
             </div>
             <div className="flex gap-2 flex-wrap">
               {weekly.customTypes.map((t) => (

@@ -394,10 +394,10 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
   return (
     <div className="space-y-3">
       {/* Modern Routine Builder */}
-      <Card className="bg-gradient-to-br from-slate-50 to-blue-50 border-blue-100 shadow-lg">
+      <Card className="overflow-hidden bg-gradient-to-br from-slate-50 to-blue-50 border-blue-100 shadow-lg">
         <CardHeader className="bg-white/50 backdrop-blur-sm">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
               <div className="flex items-center gap-2 mb-1">
                 <div className={cn(
                   "p-2 rounded-lg",
@@ -413,46 +413,46 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                 {editingId ? 'Editing existing routine' : 'Create routines or single exercises and save to your library'}
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
+            <div className="flex w-full min-w-0 flex-col gap-3 lg:w-auto lg:min-w-[20rem]">
+              <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
                 <select
                   value={composerKind}
                   onChange={(e)=>setComposerKind(e.target.value as any)}
-                  className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full min-w-0 bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent sm:w-auto"
                 >
                   <option value="routine">Workout (routine)</option>
                   <option value="exercise">Single exercise</option>
                 </select>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={composerPublic}
+                      onChange={(e)=>setComposerPublic(e.target.checked)}
+                      className="w-4 h-4 shrink-0 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                    />
+                    <span className="text-gray-700">Public</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={composerFavorite}
+                      onChange={(e)=>setComposerFavorite(e.target.checked)}
+                      className="w-4 h-4 shrink-0 text-yellow-600 bg-white border-gray-300 rounded focus:ring-yellow-500 focus:ring-2"
+                    />
+                    <span className="text-gray-700">Favorite</span>
+                  </label>
+                </div>
               </div>
-              <div className="flex items-center gap-3 text-sm">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={composerPublic}
-                    onChange={(e)=>setComposerPublic(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
-                  />
-                  <span className="text-gray-700">Public</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={composerFavorite}
-                    onChange={(e)=>setComposerFavorite(e.target.checked)}
-                    className="w-4 h-4 text-yellow-600 bg-white border-gray-300 rounded focus:ring-yellow-500 focus:ring-2"
-                  />
-                  <span className="text-gray-700">Favorite</span>
-                </label>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={resetComposer} size="sm" className="hover:bg-gray-50">
+              <div className="grid w-full grid-cols-2 gap-2 sm:w-auto sm:grid-cols-none sm:auto-cols-max sm:grid-flow-col sm:justify-end">
+                <Button variant="outline" onClick={resetComposer} size="sm" className="w-full hover:bg-gray-50 sm:w-auto">
                   Clear
                 </Button>
                 <Button
                   onClick={saveComposerAsRoutine}
                   size="sm"
                   className={cn(
-                    "shadow-sm",
+                    "w-full shadow-sm sm:w-auto",
                     editingId
                       ? "bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700"
                       : "bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700"
@@ -484,8 +484,8 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
           <div className="space-y-3">
             {composerExercises.map((ex, idx) => (
               <div key={ex.id} className="p-3 bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-colors space-y-3">
-                <div className="flex gap-3 items-center">
-                  <div className="flex-1">
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
                     <Input
                       value={ex.name}
                       placeholder="New exercise"
@@ -502,7 +502,7 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
-                <div className="flex items-center gap-4 text-sm text-gray-600">
+                <div className="flex flex-col gap-3 text-sm text-gray-600 sm:flex-row sm:items-center sm:gap-4">
                   <div className="flex items-center gap-2">
                     <span>Sets:</span>
                     <Input
@@ -637,7 +637,7 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
         items.map((it) => (
         <Card key={it.id} className="group hover:shadow-lg transition-all duration-300 border-0 bg-gradient-to-br from-white to-gray-50 hover:from-blue-50 hover:to-indigo-50">
           <CardHeader className="pb-3">
-            <div className="flex items-start justify-between">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-3 mb-2">
                   <div className={cn(
@@ -655,7 +655,7 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                     <h3 className="font-semibold text-lg text-gray-900 truncate group-hover:text-blue-900 transition-colors">
                       {it.name}
                     </h3>
-                    <div className="flex items-center gap-4 mt-1">
+                    <div className="mt-1 flex flex-wrap items-center gap-2 sm:gap-4">
                       {it.kind === 'exercise' && !it.parentRoutine ? (
                         <span className="text-sm text-gray-600 flex items-center gap-1">
                           <Target className="h-3 w-3" />
@@ -710,12 +710,12 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                   </div>
                 )}
               </div>
-              <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+              <div className="flex w-full flex-col gap-3 xl:w-auto xl:shrink-0">
                 {/* Only show Load/Append for full routines, not individual exercises */}
                 {it.kind === 'routine' ? (
                   <div className="space-y-2">
                     <div className="text-xs font-medium text-blue-600 uppercase tracking-wide">Full Workout Routine</div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       <Button
                         size="sm"
                         onClick={() => {
@@ -723,7 +723,7 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                           onLoadRoutine({ dateISO: toISO(new Date()), sessionName: it.name, exercises, completed: false, sessionTypes: it.sessionTypes || [], durationSec: 0, sourceTemplateId: it.id });
                           toasts.push(`Loaded "${it.name}". Press Start when ready.`, 'success');
                         }}
-                        className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-sm"
+                        className="w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-sm hover:from-blue-600 hover:to-blue-700 sm:w-auto"
                         title="Load this routine into your workout session"
                       >
                         <Grid3X3 className="h-3 w-3 mr-1" />
@@ -738,7 +738,7 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                           toasts.push(`Added ${exercises.length} exercise${exercises.length === 1 ? '' : 's'} from "${it.name}".`, 'success');
                         }}
                         title="Add all exercises from this routine to current workout"
-                        className="border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-300"
+                        className="w-full border-blue-200 text-blue-600 hover:border-blue-300 hover:bg-blue-50 sm:w-auto"
                       >
                         <Plus className="h-3 w-3 mr-1" />
                         Add All Exercises
@@ -748,7 +748,7 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                 ) : (
                   <div className="space-y-2">
                     <div className="text-xs font-medium text-emerald-600 uppercase tracking-wide">Single Exercise</div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       <Button
                         size="sm"
                         onClick={() => {
@@ -757,7 +757,7 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                           onLoadRoutine({ dateISO: toISO(new Date()), sessionName: 'Current Session', exercises: [exercise], completed: false, sessionTypes: [], durationSec: 0 }, 'append');
                           toasts.push(`Added "${it.name}" to the current workout.`, 'success');
                         }}
-                        className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-sm"
+                        className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-sm hover:from-emerald-600 hover:to-emerald-700 sm:w-auto"
                         title="Add this single exercise to your current workout"
                       >
                         <Target className="h-3 w-3 mr-1" />
@@ -767,7 +767,7 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                   </div>
                 )}
 
-                <div className="flex gap-1">
+                <div className="flex flex-wrap gap-1 xl:justify-end">
                   {/* Edit button - only show for routines owned by current user */}
                   {auth.currentUser?.uid && it.owner === auth.currentUser.uid && it.kind === 'routine' && (
                     <Button
