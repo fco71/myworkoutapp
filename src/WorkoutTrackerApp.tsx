@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
@@ -131,6 +131,12 @@ export default function WorkoutTrackerApp() {
   const [historyWeekIsos, setHistoryWeekIsos] = useState<string[]>([]);
   const [historyRequestedCount, setHistoryRequestedCount] = useState(INITIAL_HISTORY_PRIORITY_COUNT);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const historyLoadInFlightRef = useRef(false);
+  const historyLoadContextRef = useRef<{
+    userId: string | null;
+    historyStartMondayISO: string | null;
+  }>({ userId: null, historyStartMondayISO: null });
+  historyLoadContextRef.current = { userId, historyStartMondayISO };
 
   // Request notification permissions on app initialization
   useEffect(() => {
@@ -467,11 +473,16 @@ export default function WorkoutTrackerApp() {
   useEffect(() => {
     if (!userId || !initialized || !historyStartMondayISO) return;
     if (historyRequestedCount <= previousWeeks.length) return;
-    if (historyWeekIsos.length === 0 || historyLoading) return;
+    if (historyWeekIsos.length === 0 || historyLoadInFlightRef.current) return;
 
-    let cancelled = false;
+    const requestUserId = userId;
+    const requestHistoryStartMondayISO = historyStartMondayISO;
+    const isCurrentHistoryContext = () =>
+      historyLoadContextRef.current.userId === requestUserId &&
+      historyLoadContextRef.current.historyStartMondayISO === requestHistoryStartMondayISO;
 
     const loadRequestedHistory = async () => {
+      historyLoadInFlightRef.current = true;
       setHistoryLoading(true);
       try {
         const targetWeekIsos = historyWeekIsos.slice(0, historyRequestedCount);
@@ -488,7 +499,7 @@ export default function WorkoutTrackerApp() {
           weekly.typeCategories || {},
         );
 
-        if (cancelled) return;
+        if (!isCurrentHistoryContext()) return;
 
         setPreviousWeeks((prev) => {
           const merged = new Map(prev.map((week) => [week.weekOfISO, week]));
@@ -498,23 +509,17 @@ export default function WorkoutTrackerApp() {
           return Array.from(merged.values()).sort(sortWeeksNewestFirst);
         });
       } catch (e) {
-        if (!cancelled) {
+        if (isCurrentHistoryContext()) {
           console.warn('[WT] Failed to load additional history', e);
         }
       } finally {
-        if (!cancelled) {
-          setHistoryLoading(false);
-        }
+        historyLoadInFlightRef.current = false;
+        setHistoryLoading(false);
       }
     };
 
     loadRequestedHistory();
-
-    return () => {
-      cancelled = true;
-    };
   }, [
-    historyLoading,
     historyRequestedCount,
     historyStartMondayISO,
     historyWeekIsos,
