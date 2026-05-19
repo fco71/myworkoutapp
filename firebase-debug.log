@@ -1,0 +1,31 @@
+[debug] [2026-05-19T01:08:34.117Z] ----------------------------------------------------------------------
+[debug] [2026-05-19T01:08:34.119Z] Command:       /usr/local/bin/node /Users/fco/.npm-global/bin/firebase deploy --only hosting:production,storage --project my-film-jobs
+[debug] [2026-05-19T01:08:34.119Z] CLI Version:   15.7.0
+[debug] [2026-05-19T01:08:34.119Z] Platform:      darwin
+[debug] [2026-05-19T01:08:34.119Z] Node Version:  v22.14.0
+[debug] [2026-05-19T01:08:34.119Z] Time:          Mon May 18 2026 21:08:34 GMT-0400 (Atlantic Standard Time)
+[debug] [2026-05-19T01:08:34.119Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-05-19T01:08:34.844Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-05-19T01:08:34.845Z] > authorizing via signed-in user (franciscoadolfo@gmail.com)
+[debug] [2026-05-19T01:08:34.845Z] [iam] checking project my-film-jobs for permissions ["firebase.projects.get","firebasehosting.sites.update"]
+[debug] [2026-05-19T01:08:34.845Z] Checked if tokens are valid: true, expires at: 1779156512320
+[debug] [2026-05-19T01:08:34.845Z] Checked if tokens are valid: true, expires at: 1779156512320
+[debug] [2026-05-19T01:08:34.845Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/my-film-jobs:testIamPermissions [none]
+[debug] [2026-05-19T01:08:34.845Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/my-film-jobs:testIamPermissions  x-goog-user-project=my-film-jobs
+[debug] [2026-05-19T01:08:34.846Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/my-film-jobs:testIamPermissions {"permissions":["firebase.projects.get","firebasehosting.sites.update"]}
+[debug] [2026-05-19T01:08:35.720Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/my-film-jobs:testIamPermissions 403
+[debug] [2026-05-19T01:08:35.720Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/my-film-jobs:testIamPermissions {"error":{"code":403,"message":"Caller does not have required permission to use project my-film-jobs. Grant the caller the roles/serviceusage.serviceUsageConsumer role, or a custom role with the serviceusage.services.use permission, by visiting https://console.developers.google.com/iam-admin/iam?project=my-film-jobs and then retry. Propagation of the new permission may take a few minutes.","status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"USER_PROJECT_DENIED","domain":"googleapis.com","metadata":{"consumer":"projects/my-film-jobs","consoleUrl":"https://console.developers.google.com/iam-admin/iam?project=my-film-jobs","service":"cloudresourcemanager.googleapis.com","containerInfo":"my-film-jobs"}},{"@type":"type.googleapis.com/google.rpc.LocalizedMessage","locale":"en-US","message":"Caller does not have required permission to use project my-film-jobs. Grant the caller the roles/serviceusage.serviceUsageConsumer role, or a custom role with the serviceusage.services.use permission, by visiting https://console.developers.google.com/iam-admin/iam?project=my-film-jobs and then retry. Propagation of the new permission may take a few minutes."},{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Google developer console IAM admin","url":"https://console.developers.google.com/iam-admin/iam?project=my-film-jobs"}]}]}}
+[debug] [2026-05-19T01:08:35.721Z] [iam] error while checking permissions, command may fail: Request to https://cloudresourcemanager.googleapis.com/v1/projects/my-film-jobs:testIamPermissions had HTTP Error: 403, Caller does not have required permission to use project my-film-jobs. Grant the caller the roles/serviceusage.serviceUsageConsumer role, or a custom role with the serviceusage.services.use permission, by visiting https://console.developers.google.com/iam-admin/iam?project=my-film-jobs and then retry. Propagation of the new permission may take a few minutes.
+[debug] [2026-05-19T01:08:35.722Z] Checked if tokens are valid: true, expires at: 1779156512320
+[debug] [2026-05-19T01:08:35.722Z] Checked if tokens are valid: true, expires at: 1779156512320
+[debug] [2026-05-19T01:08:35.722Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/my-film-jobs [none]
+[debug] [2026-05-19T01:08:36.219Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/my-film-jobs 403
+[debug] [2026-05-19T01:08:36.219Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/my-film-jobs {"error":{"code":403,"message":"The caller does not have permission","status":"PERMISSION_DENIED"}}
+[debug] [2026-05-19T01:08:36.220Z] Request to https://firebase.googleapis.com/v1beta1/projects/my-film-jobs had HTTP Error: 403, The caller does not have permission
+[debug] [2026-05-19T01:08:36.534Z] FirebaseError: Request to https://firebase.googleapis.com/v1beta1/projects/my-film-jobs had HTTP Error: 403, The caller does not have permission
+    at responseToError (/Users/fco/.npm-global/lib/node_modules/firebase-tools/lib/responseToError.js:53:12)
+    at RetryOperation._fn (/Users/fco/.npm-global/lib/node_modules/firebase-tools/lib/apiv2.js:330:77)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+[error] 
+[error] Error: Failed to get Firebase project my-film-jobs. Please make sure the project exists and your account has permission to access it.
