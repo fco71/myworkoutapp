@@ -63,6 +63,22 @@ function formatDuration(totalSeconds: number) {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+const WORKOUT_AUTO_CUTOFF_SEC = 2 * 60 * 60;
+
+function getCappedWorkoutDuration(session: ResistanceSession, currentTimerSec: number) {
+  const elapsedSec = session.startedAt
+    ? Math.floor((Date.now() - session.startedAt) / 1000)
+    : currentTimerSec;
+  const uncappedDuration = Math.max(session.durationSec || 0, currentTimerSec || 0, elapsedSec || 0);
+  return Math.min(WORKOUT_AUTO_CUTOFF_SEC, uncappedDuration);
+}
+
+function hasReachedWorkoutCutoff(session: ResistanceSession, currentTimerSec: number) {
+  if (!session.startedAt || session.completed) return false;
+  const elapsedSec = Math.floor((Date.now() - session.startedAt) / 1000);
+  return Math.max(session.durationSec || 0, currentTimerSec || 0, elapsedSec || 0) >= WORKOUT_AUTO_CUTOFF_SEC;
+}
+
 function ExerciseCard({
   ex,
   updateExercise,
@@ -638,6 +654,8 @@ export function WorkoutView({
   const [routineName, setRoutineName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const workoutActive = Boolean(session.startedAt && !session.completed);
+  const displayedTimerSec = workoutActive ? getCappedWorkoutDuration(session, timerSec) : timerSec;
+  const workoutAutoCutoffReached = hasReachedWorkoutCutoff(session, timerSec);
 
   // initialize whether current session (template) is favorited by the user
   useEffect(() => {
@@ -694,8 +712,7 @@ export function WorkoutView({
   useEffect(() => {
     const syncTimer = () => {
       if (session.startedAt && !session.completed) {
-        const elapsed = Math.max(session.durationSec || 0, Math.floor((Date.now() - session.startedAt) / 1000));
-        setTimerSec(elapsed);
+        setTimerSec(getCappedWorkoutDuration(session, timerSec));
         return;
       }
 
@@ -704,13 +721,13 @@ export function WorkoutView({
 
     syncTimer();
 
-    if (!session.startedAt || session.completed) {
+    if (!session.startedAt || session.completed || hasReachedWorkoutCutoff(session, timerSec)) {
       return;
     }
 
     const id = window.setInterval(syncTimer, 1000);
     return () => window.clearInterval(id);
-  }, [session.startedAt, session.durationSec, session.completed]);
+  }, [session.startedAt, session.durationSec, session.completed, timerSec]);
   const totalStats = useMemo(() => {
     const totalExercises = session.exercises.length;
     const totalSets = session.exercises.reduce((a, e) => a + e.sets.filter(s => (s || 0) > 0).length, 0);
@@ -727,7 +744,13 @@ export function WorkoutView({
   const sessionTypesLabel = session.sessionTypes.length > 0 ? session.sessionTypes.join(", ") : "Uncategorized";
   const nextFocusExercise = session.exercises.find((exercise) => !getExerciseProgress(exercise).goalMet);
   const nextFocusLabel = nextFocusExercise?.name?.trim() || session.exercises[0]?.name?.trim() || "Add an exercise";
-  const sessionStatusLabel = session.completed ? "Saved" : workoutActive ? "In progress" : "Ready to start";
+  const sessionStatusLabel = session.completed
+    ? "Saved"
+    : workoutAutoCutoffReached
+      ? "Cut off"
+      : workoutActive
+        ? "In progress"
+        : "Ready to start";
   const formattedSessionDate = new Date(session.dateISO + "T00:00").toLocaleDateString("en-US", {
     weekday: "long",
     year: "numeric",
@@ -820,18 +843,14 @@ export function WorkoutView({
       return;
     }
     completedGuards.add(session);
-    const finalDurationSec = session.startedAt
-      ? Math.max(timerSec, Math.floor((Date.now() - session.startedAt) / 1000))
-      : timerSec;
+    const finalDurationSec = getCappedWorkoutDuration(session, timerSec);
 
     // Mark session as completed in local state
     setSession({ ...session, completed: true, durationSec: finalDurationSec });
 
-    // Play celebration sound for workout completion
-    playWorkoutCompletionSound();
-
     const today = session.dateISO;
     const todayIndex = weekly.days.findIndex((d) => d.dateISO === today);
+    const freshSession = defaultSession();
 
     // Persist completed session to Firestore first so we get a document id
     try {
@@ -842,6 +861,7 @@ export function WorkoutView({
         const payload = { ...session, completed: true, durationSec: finalDurationSec, completedAt: Date.now() };
         const docRef = await addDoc(collection(db, 'users', uid, 'sessions'), payload as any);
         const sessionId = docRef.id;
+        let nextWeekly = weekly;
 
         if (todayIndex !== -1) {
           const updatedDays = [...weekly.days];
@@ -856,27 +876,33 @@ export function WorkoutView({
           const after = { ...newTypes, sessions: oldList.length };
           updatedDays[todayIndex] = { ...updatedDays[todayIndex], types: newTypes, sessions: after.sessions, sessionsList: oldList };
           const newWeekly = { ...weekly, days: updatedDays } as WeeklyPlan;
-          setWeekly(newWeekly);
-          // Persist weekly immediately so sessionsList is saved server-side
-          try {
-            await setDoc(doc(db, 'users', uid, 'state', newWeekly.weekOfISO), { weekly: newWeekly }, { merge: true });
-          } catch (e) {
-            console.error('[WT] failed to persist weekly after completeWorkout', e);
-          }
+          nextWeekly = newWeekly;
+          setWeekly(nextWeekly);
         } else {
           console.warn('[WT] completeWorkout: todayIndex not found in weekly.days', { today, weeklyDays: weekly.days.map((d) => d.dateISO) });
         }
+
+        // Persist weekly and the cleared active session together so a reload cannot restore
+        // the just-finished workout as an open session.
+        await setDoc(doc(db, 'users', uid, 'state', nextWeekly.weekOfISO), { weekly: nextWeekly, session: freshSession }, { merge: true });
       }
     } catch (e) {
       console.error('Failed to save completed session', e);
+      completedGuards.delete(session);
+      setSession({ ...session, completed: false, durationSec: finalDurationSec });
+      toasts.push('Failed to save workout. Keeping it open.', 'error');
+      return;
     }
+    // Play celebration sound after the save path succeeds.
+    playWorkoutCompletionSound();
+
     // stop the timer when completed
     setTimerSec(0);
 
     // Clear the current workout session to make space for a new one
     // The completed workout is now saved in history and remains editable there
     setTimeout(() => {
-      setSession(defaultSession());
+      setSession(freshSession);
       toasts.push('Workout completed. Starting a fresh workout session.', 'success');
     }, 1500); // Small delay to let user see the completion state
 
@@ -1103,7 +1129,7 @@ export function WorkoutView({
             <div className="grid w-full gap-3 sm:grid-cols-2 xl:w-[420px]">
               <div className="rounded-3xl bg-white/85 p-4 shadow-sm ring-1 ring-white/70">
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Workout duration</div>
-                <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{session.startedAt ? formatDuration(timerSec) : "--:--"}</div>
+                <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{session.startedAt ? formatDuration(displayedTimerSec) : "--:--"}</div>
                 <div className="mt-1 text-sm text-slate-500">{sessionStatusLabel}</div>
               </div>
               <div className="rounded-3xl bg-white/85 p-4 shadow-sm ring-1 ring-white/70">
@@ -1132,9 +1158,13 @@ export function WorkoutView({
             <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Workout duration</div>
-                <div className="mt-2 text-4xl font-semibold tracking-tight md:text-[2.75rem]">{session.startedAt ? formatDuration(timerSec) : "--:--"}</div>
+                <div className="mt-2 text-4xl font-semibold tracking-tight md:text-[2.75rem]">{session.startedAt ? formatDuration(displayedTimerSec) : "--:--"}</div>
                 <div className="mt-2 max-w-md text-sm text-slate-200">
-                  {session.startedAt ? "Whole-session elapsed time. Rest timing is separate." : "Press Start to begin timing your workout."}
+                  {session.startedAt
+                    ? workoutAutoCutoffReached
+                      ? "Timer stopped automatically at 2 hours. Finish to save the capped duration."
+                      : "Whole-session elapsed time. Rest timing is separate."
+                    : "Press Start to begin timing your workout."}
                 </div>
               </div>
               <div className="rounded-3xl bg-white/12 px-4 py-4 md:min-w-[210px]">
@@ -1145,6 +1175,8 @@ export function WorkoutView({
                 <div className="mt-1 text-sm text-slate-200">
                   {session.completed
                     ? "Workout session saved."
+                    : workoutAutoCutoffReached
+                      ? `Timer stopped at ${formatDuration(WORKOUT_AUTO_CUTOFF_SEC)}. Finish to save or start over.`
                     : `${completedExercises} of ${totalStats.totalExercises} exercises hit their target.`}
                 </div>
               </div>
@@ -1221,7 +1253,7 @@ export function WorkoutView({
                   className="justify-start bg-slate-900 text-white hover:bg-slate-800"
                 >
                   <Save className="mr-2 h-4 w-4" />
-                  {isSaving ? 'Saving...' : 'Save routine'}
+                  {isSaving ? 'Saving...' : 'Save as routine'}
                 </Button>
                 <Button
                   variant="outline"
@@ -1302,7 +1334,7 @@ export function WorkoutView({
           <div>
             <div className="text-sm font-semibold text-slate-900">Session footer</div>
             <div className="mt-1 text-sm text-slate-600">
-              Timer: {formatDuration(timerSec)}. Volume: {totalStats.totalSets} sets and {totalStats.totalReps} reps.
+              Timer: {formatDuration(displayedTimerSec)}. Volume: {totalStats.totalSets} sets and {totalStats.totalReps} reps.
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1317,7 +1349,7 @@ export function WorkoutView({
             {!session.completed ? (
               <Button onClick={completeWorkout} className="bg-emerald-500 text-white hover:bg-emerald-600">
                 <Check className="mr-2 h-4 w-4" />
-                Complete workout
+                Finish & save workout
               </Button>
             ) : null}
           </div>
@@ -1332,8 +1364,10 @@ export function WorkoutView({
           >
             <Check className="mr-3 h-5 w-5" />
             <span className="flex flex-col items-start leading-tight">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-100">Finish workout</span>
-              <span className="text-sm font-semibold">Save {formatDuration(timerSec)}</span>
+              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-100">
+                {workoutAutoCutoffReached ? "Timer cut off" : "Finish workout"}
+              </span>
+              <span className="text-sm font-semibold">Save {formatDuration(displayedTimerSec)}</span>
             </span>
           </Button>
         </div>
@@ -1386,7 +1420,7 @@ export function WorkoutView({
       {saveDialogOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold mb-4">Save Routine</h3>
+            <h3 className="text-lg font-semibold mb-4">Save Routine Template</h3>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1406,7 +1440,7 @@ export function WorkoutView({
               </div>
 
               <div className="text-sm text-gray-500">
-                This will save {session.exercises.length} exercises to your library.
+                This saves {session.exercises.length} exercises to your library. It does not finish the current workout.
               </div>
             </div>
 
@@ -1425,7 +1459,7 @@ export function WorkoutView({
                 onClick={confirmSaveRoutine}
                 disabled={isSaving || !routineName.trim()}
               >
-                {isSaving ? 'Saving...' : 'Save Routine'}
+                {isSaving ? 'Saving...' : 'Save Template'}
               </Button>
             </div>
           </div>
