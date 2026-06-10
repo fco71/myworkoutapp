@@ -479,37 +479,42 @@ export function WeeklyTracker({
           <table className="min-w-full border-separate border-spacing-0">
             <thead>
               <tr>
-                <th className="sticky left-0 z-10 min-w-[80px] border-b bg-white p-1 text-left text-sm">Type</th>
+                <th className="sticky left-0 z-10 min-w-[80px] border-b border-slate-100 bg-white px-2 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Type</th>
                 {weekly.days.map((d) => {
                   const isToday = d.dateISO === todayISO;
                   return (
                   <th
                     key={d.dateISO}
                     className={cn(
-                      "min-w-[42px] border-b p-1 text-center text-xs font-medium sm:min-w-[46px]",
-                      isToday && "bg-blue-50 text-blue-700"
+                      "min-w-[44px] border-b border-slate-100 px-1 py-3 text-center text-xs font-medium sm:min-w-[48px]",
+                      isToday ? "bg-blue-50/40 text-blue-600" : "text-slate-500"
                     )}
                   >
-                    {new Date(d.dateISO + 'T00:00').toLocaleDateString(undefined, { weekday: "short" })}
-                    <div className={cn("text-[10px] text-neutral-500", isToday && "font-semibold text-blue-600")}>
-                      {new Date(d.dateISO + 'T00:00').getDate()}
+                    <div className="flex flex-col items-center gap-1">
+                      <span>{new Date(d.dateISO + 'T00:00').toLocaleDateString(undefined, { weekday: "short" })}</span>
+                      <span className={cn(
+                        "flex h-6 w-6 items-center justify-center rounded-full text-[11px]",
+                        isToday ? "bg-blue-500 font-semibold text-white" : "text-slate-400"
+                      )}>
+                        {new Date(d.dateISO + 'T00:00').getDate()}
+                      </span>
                     </div>
                   </th>
                   );
                 })}
-                <th className="border-b p-1 text-left text-xs sm:text-sm">Total</th>
-                <th className="border-b p-1 text-left text-xs sm:text-sm">Goal</th>
+                <th className="border-b border-slate-100 px-2 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Total</th>
+                <th className="border-b border-slate-100 px-2 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Goal</th>
               </tr>
             </thead>
             <tbody>
               {types.map((t) => {
                 const hit = counts[t] >= (weekly.benchmarks[t] ?? 0);
                 return (
-                  <tr key={t} className="group/row transition-colors hover:bg-slate-50/80">
-                    <td className="sticky left-0 z-10 border-b bg-white p-1 text-sm font-medium">
-                      <div className="flex items-center justify-between">
-                        <span className={hit ? 'text-green-700' : ''}>{t}</span>
-                        <div className="flex gap-1 opacity-60 hover:opacity-100">
+                  <tr key={t} className="group/row transition-colors hover:bg-slate-50/70">
+                    <td className="sticky left-0 z-10 border-b border-slate-100 bg-white px-2 py-2.5 text-sm font-medium transition-colors group-hover/row:bg-slate-50">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={cn("truncate", hit && "text-emerald-700")}>{t}</span>
+                        <div className="flex gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100">
                           <Button
                             size="sm"
                             variant="ghost"
@@ -561,22 +566,22 @@ export function WeeklyTracker({
                         <td
                           key={`${d.dateISO}-${t}`}
                           className={cn(
-                            "relative border-b p-0.5 text-center align-middle transition-colors sm:p-1",
-                            isToday && "bg-blue-50/50"
+                            "group/cell relative border-b border-slate-100 p-1 text-center align-middle transition-colors sm:p-1.5",
+                            isToday && "bg-blue-50/40"
                           )}
                         >
-                          <div className="flex min-h-[40px] items-center justify-center">
+                          <div className="flex min-h-[44px] items-center justify-center">
                             <button
                               type="button"
                               aria-label={`${active ? 'Remove' : 'Log'} ${t} for ${new Date(d.dateISO + 'T00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}`}
                               aria-pressed={active}
                               title={active ? 'Activity logged. Click to remove.' : 'Click to log activity'}
                               className={cn(
-                                "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors duration-150",
-                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2",
+                                "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-all duration-150",
+                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 focus-visible:ring-offset-1",
                                 active
-                                  ? "border-emerald-300 bg-emerald-50/70 text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100/70"
-                                  : "border-slate-300 bg-white text-slate-400 hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-600"
+                                  ? "border border-emerald-200 bg-emerald-50 text-emerald-600 shadow-sm hover:border-emerald-300 hover:bg-emerald-100"
+                                  : "text-slate-400 opacity-25 hover:bg-slate-100 hover:text-slate-600 group-hover/cell:opacity-100"
                               )}
                               onClick={async () => {
                               const days = [...weekly.days];
@@ -643,9 +648,9 @@ export function WeeklyTracker({
                               }}
                             >
                               {active ? (
-                                <Check className="h-4 w-4 stroke-2" />
+                                <Check className="h-[18px] w-[18px] stroke-[2.5]" />
                               ) : (
-                                <Plus className="h-4 w-4 stroke-2" />
+                                <Plus className="h-[18px] w-[18px] stroke-2" />
                               )}
                             </button>
 
@@ -654,8 +659,8 @@ export function WeeklyTracker({
                               size="sm"
                               variant="ghost"
                               className={cn(
-                                "absolute bottom-0.5 right-0.5 h-4 w-4 rounded p-0 text-slate-400 opacity-25 transition-colors hover:bg-blue-50 hover:text-blue-600 hover:opacity-100",
-                                d.comments?.[t] && "bg-blue-100 text-blue-600 opacity-100"
+                                "absolute bottom-0 right-0 h-4 w-4 rounded p-0 text-slate-400 opacity-0 transition-opacity hover:bg-blue-50 hover:text-blue-600 group-hover/cell:opacity-100",
+                                d.comments?.[t] && "text-blue-500 opacity-100"
                               )}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -669,19 +674,19 @@ export function WeeklyTracker({
                         </td>
                       );
                     })}
-                    <td className="border-b p-1 font-semibold">
+                    <td className="border-b border-slate-100 px-2 py-2.5 font-semibold">
                       {(() => {
                         const n = Math.min(7, counts[t]);
-                        return <span>{n} <span className="text-[10px] text-neutral-500">{n === 1 ? 'day' : 'days'}</span></span>;
+                        return <span className={cn("tabular-nums", hit && "text-emerald-700")}>{n} <span className={cn("text-[10px] font-normal text-slate-400", hit && "text-emerald-500")}>{n === 1 ? 'day' : 'days'}</span></span>;
                       })()}
                     </td>
-                    <td className="border-b p-1">
+                    <td className="border-b border-slate-100 px-2 py-2.5">
                       <div className="flex items-center gap-2">
                         <Input
                           type="number"
                           className={cn(
-                            "h-8 w-16 px-2",
-                            hit && "bg-green-50 border-green-400 text-green-900"
+                            "h-9 w-16 px-2 transition-colors",
+                            hit && "border-emerald-300 bg-emerald-50 text-emerald-800"
                           )}
                           value={weekly.benchmarks[t] ?? 0}
                           onChange={(e) => {
@@ -692,9 +697,9 @@ export function WeeklyTracker({
                             });
                           }}
                         />
-                        <span className="text-[10px] text-neutral-500">{(weekly.benchmarks[t] ?? 0) === 1 ? 'day' : 'days'}</span>
-                        <span className={cn("text-xs flex items-center gap-1", hit ? "text-green-700" : "invisible")}>
-                          <Check className="h-4 w-4" /> goal met
+                        <span className="text-[10px] text-slate-400">{(weekly.benchmarks[t] ?? 0) === 1 ? 'day' : 'days'}</span>
+                        <span className={cn("flex items-center gap-1 text-xs font-medium", hit ? "text-emerald-600" : "invisible")}>
+                          <Check className="h-3.5 w-3.5" /> goal met
                         </span>
                       </div>
                     </td>
