@@ -4,13 +4,12 @@ import { doc, setDoc } from "firebase/firestore";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Check, Save, Edit, Trash2, MessageSquare } from "lucide-react";
+import { Plus, Check, Save, Edit, Trash2, MessageSquare, RotateCcw } from "lucide-react";
 import { WeeklyPlan } from "@/types";
 import {
   cn,
   weekDates,
   toISO,
-  getMonday,
   loadGlobalTypes,
   loadTypeCategories,
   normalizeWeekly,
@@ -22,14 +21,14 @@ export function WeeklyTracker({
   setWeekly,
   push,
   programStartDate,
-  setProgramStartDate,
+  onStartFresh,
   previousWeeks = [],
 }: {
   weekly: WeeklyPlan;
   setWeekly: (w: WeeklyPlan) => void;
   push?: (text: string, kind?: 'info'|'success'|'error') => void;
   programStartDate: string;
-  setProgramStartDate: (d: string) => void;
+  onStartFresh: () => Promise<void> | void;
   previousWeeks?: WeeklyPlan[];
 }) {
   const types = weekly.customTypes;
@@ -61,8 +60,21 @@ export function WeeklyTracker({
   }, [weekly.days, types]);
 
   const monday = new Date(weekly.weekOfISO + 'T00:00:00'); // Add time to avoid timezone issues
+  const todayISO = toISO(new Date());
   const [newTypeName, setNewTypeName] = useState("");
   const [newTypeCategory, setNewTypeCategory] = useState<string>("None");
+  const [startFreshPending, setStartFreshPending] = useState(false);
+
+  const handleStartFresh = async () => {
+    if (startFreshPending) return;
+    setStartFreshPending(true);
+    try {
+      await onStartFresh();
+      setShowProgramSettings(false);
+    } finally {
+      setStartFreshPending(false);
+    }
+  };
 
   // On mount, ensure weekly.customTypes is populated from global settings if needed
   useEffect(() => {
@@ -265,34 +277,12 @@ export function WeeklyTracker({
               </span>
             )}
           </CardTitle>
-          <p className="text-sm text-slate-600">Click cells to toggle what you did each day.</p>
+          <p className="text-sm text-slate-600">Track what you did each day.</p>
         </div>
         <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end">
-          <Button variant="outline" className="w-full sm:w-auto" onClick={() => {
-            // Reset to current week
-            const currentMon = getMonday();
-            const currentWeekISO = toISO(currentMon);
-            const currentWeekDates = weekDates(currentMon).map(d => toISO(d));
-
-            const newWeekly: WeeklyPlan = {
-              ...weekly,
-              weekOfISO: currentWeekISO,
-              days: currentWeekDates.map(dateISO => {
-                const existingDay = weekly.days.find(d => d.dateISO === dateISO);
-                return existingDay || {
-                  dateISO,
-                  types: {},
-                  sessions: 0,
-                  sessionsList: [],
-                  comments: {}
-                };
-              })
-            };
-
-            setWeekly(newWeekly);
-            push?.('Reset to current week', 'success');
-          }}>
-            Reset to Current Week
+          <Button variant="outline" className="w-full sm:w-auto" onClick={handleStartFresh} disabled={startFreshPending}>
+            <RotateCcw className="mr-2 h-4 w-4" />
+            {startFreshPending ? 'Starting...' : 'Start Fresh'}
           </Button>
           <Button variant="secondary" onClick={async () => {
             const uid = auth.currentUser?.uid;
@@ -490,12 +480,23 @@ export function WeeklyTracker({
             <thead>
               <tr>
                 <th className="sticky left-0 z-10 bg-white text-left p-1 sm:p-2 border-b text-sm min-w-[80px]">Type</th>
-                {weekly.days.map((d) => (
-                  <th key={d.dateISO} className="p-1 sm:p-2 text-xs font-medium border-b min-w-[36px] text-center">
+                {weekly.days.map((d) => {
+                  const isToday = d.dateISO === todayISO;
+                  return (
+                  <th
+                    key={d.dateISO}
+                    className={cn(
+                      "min-w-[48px] border-b p-1 text-center text-xs font-medium sm:min-w-[54px] sm:p-2",
+                      isToday && "bg-blue-50 text-blue-700"
+                    )}
+                  >
                     {new Date(d.dateISO + 'T00:00').toLocaleDateString(undefined, { weekday: "short" })}
-                    <div className="text-[10px] text-neutral-500">{new Date(d.dateISO + 'T00:00').getDate()}</div>
+                    <div className={cn("text-[10px] text-neutral-500", isToday && "font-semibold text-blue-600")}>
+                      {new Date(d.dateISO + 'T00:00').getDate()}
+                    </div>
                   </th>
-                ))}
+                  );
+                })}
                 <th className="p-1 sm:p-2 text-left border-b text-xs sm:text-sm">Total</th>
                 <th className="p-1 sm:p-2 text-left border-b text-xs sm:text-sm">Goal</th>
               </tr>
@@ -504,7 +505,7 @@ export function WeeklyTracker({
               {types.map((t) => {
                 const hit = counts[t] >= (weekly.benchmarks[t] ?? 0);
                 return (
-                  <tr key={t} className="">
+                  <tr key={t} className="group/row transition-colors hover:bg-slate-50/80">
                     <td className="sticky left-0 z-10 bg-white p-1 sm:p-2 font-medium border-b text-sm">
                       <div className="flex items-center justify-between">
                         <span className={hit ? 'text-green-700' : ''}>{t}</span>
@@ -555,14 +556,30 @@ export function WeeklyTracker({
                     </td>
                     {weekly.days.map((d, idx) => {
                       const active = !!d.types[t];
+                      const isToday = d.dateISO === todayISO;
                       return (
                         <td
                           key={`${d.dateISO}-${t}`}
                           className={cn(
-                            "p-1 sm:p-2 text-center align-middle border-b cursor-pointer relative hover-parent",
-                            active && "bg-green-100/70"
+                            "relative border-b p-1 text-center align-middle transition-colors sm:p-2",
+                            isToday && "bg-blue-50/60",
+                            active && "bg-emerald-50/40"
                           )}
-                          onClick={async () => {
+                        >
+                          <div className="flex min-h-[52px] flex-col items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              aria-label={`${active ? 'Remove' : 'Log'} ${t} for ${new Date(d.dateISO + 'T00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}`}
+                              aria-pressed={active}
+                              title={active ? 'Activity logged. Click to remove.' : 'Click to log activity'}
+                              className={cn(
+                                "flex h-10 w-10 shrink-0 items-center justify-center rounded-md border-2 transition-all duration-150",
+                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2",
+                                active
+                                  ? "border-emerald-300 bg-emerald-50 text-emerald-700 shadow-sm hover:border-emerald-400 hover:bg-emerald-100"
+                                  : "border-slate-300 bg-white text-slate-400 shadow-sm hover:-translate-y-0.5 hover:border-blue-500 hover:bg-blue-50 hover:text-blue-600 hover:shadow-md"
+                              )}
+                              onClick={async () => {
                               const days = [...weekly.days];
                               const day = { ...days[idx] };
                               const newTypes = { ...day.types, [t]: !active } as Record<string, boolean>;
@@ -624,23 +641,22 @@ export function WeeklyTracker({
                               // persist weekly settings (ensure we persist the fresh newWeekly)
                               try { if (uid) await setDoc(doc(db, 'users', uid, 'state', newWeekly.weekOfISO), { weekly: newWeekly }, { merge: true }); } catch (e) { console.warn('[WT] failed to persist weekly after toggle', e); }
                               // No automatic session reconstruction — weekly state is authoritative.
-                            }}
-                        >
-                          <div className="flex items-center justify-center gap-1">
-                            {/* Main checkbox area */}
-                            <div className="flex-1 flex justify-center">
-                              {active ? <Check className="inline h-4 w-4" /> : ""}
-                            </div>
+                              }}
+                            >
+                              {active ? (
+                                <Check className="h-5 w-5 stroke-[2.25]" />
+                              ) : (
+                                <Plus className="h-5 w-5 stroke-[2.5]" />
+                              )}
+                            </button>
 
                             {/* Comment indicator/button */}
                             <Button
                               size="sm"
                               variant="ghost"
                               className={cn(
-                                "h-5 w-5 p-0 absolute top-0 right-0 m-0.5 transition-opacity",
-                                "opacity-20 hover:!opacity-100",
-                                "[.hover-parent:hover_&]:opacity-60",
-                                d.comments?.[t] && "!opacity-100 text-blue-600 bg-blue-50"
+                                "h-5 w-5 rounded-full p-0 text-slate-400 opacity-40 transition-all hover:bg-blue-100 hover:text-blue-600 hover:opacity-100",
+                                d.comments?.[t] && "bg-blue-100 text-blue-600 opacity-100"
                               )}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -717,31 +733,17 @@ export function WeeklyTracker({
               </div>
               <div className="pt-2 border-t">
                 <p className="text-sm text-gray-600 mb-3">
-                  Reset the week count to start a new program cycle. This will set the start date to this week's Monday and restart at Week 1.
-                  <strong className="block mt-2">Note: All your previous weeks' data will be preserved and remain visible in the Previous Weeks section.</strong>
+                  Reset the week count to start a new program cycle. This sets the start date to this week's Monday and restarts at Week 1.
+                  <strong className="block mt-2">Note: previous data is preserved in your account, but the Previous Weeks section starts over from the new program date.</strong>
                 </p>
                 <Button
                   variant="outline"
-                  onClick={async () => {
-                    const newStartDate = toISO(getMonday(new Date()));
-                    setProgramStartDate(newStartDate);
-                    setWeekly({
-                      ...weekly,
-                      weekNumber: 1
-                    });
-                    // Save to Firestore (data is preserved, only start date changes)
-                    const uid = auth.currentUser?.uid;
-                    if (uid) {
-                      await setDoc(doc(db, 'users', uid, 'settings', 'program'), {
-                        programStartDate: newStartDate
-                      }, { merge: true });
-                    }
-                    if (push) push('Week count reset to 1. All previous data preserved!', 'success');
-                    setShowProgramSettings(false);
-                  }}
+                  onClick={handleStartFresh}
                   className="w-full"
+                  disabled={startFreshPending}
                 >
-                  Reset to Week 1
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  {startFreshPending ? 'Starting...' : 'Start Fresh at Week 1'}
                 </Button>
               </div>
             </div>

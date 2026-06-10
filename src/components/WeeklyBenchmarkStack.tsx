@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Check } from "lucide-react";
-import { MessageSquare } from "lucide-react";
+import { Check, MessageSquare, Plus } from "lucide-react";
 import { WeeklyPlan } from "@/types";
 import { toISO, cn } from "@/lib/workout-utils";
 
@@ -107,23 +106,30 @@ function PreviousWeekTracker({
                   const isChecked = day.types?.[type] || false;
                   const hasComment = day.comments?.[type]?.trim();
                   const isToday = day.dateISO === today;
+                  const date = new Date(day.dateISO + 'T00:00');
 
                   return (
-                    <td key={dayIndex} className={`p-3 border-b text-center ${
-                      isToday ? 'bg-blue-50' : ''
+                    <td key={dayIndex} className={`border-b p-3 text-center transition-colors ${
+                      isToday ? 'bg-blue-50/70' : ''
                     }`}>
                       <div className="flex flex-col items-center gap-1">
-                        {/* Clickable Checkbox - Now editable */}
                         <button
+                          type="button"
                           onClick={() => toggleWorkout(dayIndex, type)}
-                          className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors hover:shadow-md ${
+                          aria-label={`${isChecked ? 'Remove' : 'Log'} ${type} for ${date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}`}
+                          aria-pressed={isChecked}
+                          className={`flex h-10 w-10 items-center justify-center rounded-md border-2 shadow-sm transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
                             isChecked
-                              ? 'bg-green-500 border-green-500 text-white hover:bg-green-600'
-                              : 'border-gray-300 bg-white hover:border-gray-400'
+                              ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100'
+                              : 'border-slate-300 bg-white text-slate-400 hover:-translate-y-0.5 hover:border-blue-500 hover:bg-blue-50 hover:text-blue-600 hover:shadow-md'
                           }`}
-                          title="Click to toggle workout completion"
+                          title={isChecked ? 'Activity logged. Click to remove.' : 'Click to log activity'}
                         >
-                          {isChecked && <Check className="w-4 h-4" />}
+                          {isChecked ? (
+                            <Check className="h-5 w-5 stroke-[2.25]" />
+                          ) : (
+                            <Plus className="h-5 w-5 stroke-[2.5]" />
+                          )}
                         </button>
 
                         {/* Comment button */}
@@ -131,8 +137,8 @@ function PreviousWeekTracker({
                           onClick={(e) => { e.stopPropagation(); openCommentModal(type, dayIndex); }}
                           title={hasComment ? `Comment: ${day.comments?.[type]}` : 'Add comment'}
                           className={cn(
-                            "h-4 w-4 flex items-center justify-center rounded transition-opacity",
-                            hasComment ? "opacity-100 text-blue-500" : "opacity-20 hover:opacity-70 text-gray-400"
+                            "flex h-5 w-5 items-center justify-center rounded-full text-slate-400 opacity-40 transition-all hover:bg-blue-100 hover:text-blue-600 hover:opacity-100",
+                            hasComment && "bg-blue-100 text-blue-600 opacity-100"
                           )}
                         >
                           <MessageSquare className="w-3 h-3" />

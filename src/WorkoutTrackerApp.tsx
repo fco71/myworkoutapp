@@ -42,10 +42,18 @@ const HISTORY_LOAD_INCREMENT = 4;
 const sortWeeksNewestFirst = (a: WeeklyPlan, b: WeeklyPlan) =>
   new Date(b.weekOfISO).getTime() - new Date(a.weekOfISO).getTime();
 
+function getDefaultProgramStartDate() {
+  return toISO(getMonday());
+}
+
 function getWeekNumberFromStart(weekOfISO: string, startMondayISO: string) {
   const weekMonday = new Date(`${weekOfISO}T00:00:00`);
   const startMonday = new Date(`${startMondayISO}T00:00:00`);
   return Math.max(1, Math.floor((weekMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1);
+}
+
+function isISODate(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 function buildHistoryPlan(programStartDate: string) {
@@ -76,6 +84,43 @@ function normalizeStoredWeek(rawWeekly: WeeklyPlan, weekOfISO: string, startMond
     ...normalized,
     weekNumber: getWeekNumberFromStart(weekOfISO, startMondayISO),
   };
+}
+
+function alignWeeklyToCurrentWeek(incomingWeekly: WeeklyPlan, currentMonday: Date, currentWeekISO: string) {
+  let normalized = normalizeWeekly({
+    ...incomingWeekly,
+    customTypes: ensureUniqueTypes(incomingWeekly.customTypes || []),
+    weekOfISO: currentWeekISO,
+  } as WeeklyPlan);
+
+  const currentWeekDates = weekDates(currentMonday).map(d => toISO(d));
+  const existingDates = normalized.days.map(d => d.dateISO);
+
+  if (!arraysEqual(currentWeekDates, existingDates)) {
+    const newDays = currentWeekDates.map(dateISO => {
+      const existingDay = normalized.days.find(d => d.dateISO === dateISO);
+      return existingDay || {
+        dateISO,
+        types: {},
+        sessions: 0,
+        sessionsList: [],
+        comments: {},
+      };
+    });
+    normalized = { ...normalized, days: newDays };
+  }
+
+  if (!normalized.customTypes || normalized.customTypes.length === 0) {
+    const globals = loadGlobalTypes();
+    const categories = loadTypeCategories();
+    normalized = normalizeWeekly({
+      ...normalized,
+      customTypes: globals,
+      typeCategories: { ...(normalized.typeCategories || {}), ...(categories || {}) },
+    } as WeeklyPlan);
+  }
+
+  return normalized;
 }
 
 async function loadPreviousWeeksBatch(
@@ -117,7 +162,7 @@ export default function WorkoutTrackerApp() {
   const [weekly, setWeekly] = useState<WeeklyPlan>(defaultWeekly());
 
   const [previousWeeks, setPreviousWeeks] = useState<WeeklyPlan[]>([]);
-  const [programStartDate, setProgramStartDate] = useState<string>('2025-09-22'); // Start date of current program
+  const [programStartDate, setProgramStartDate] = useState<string>(() => getDefaultProgramStartDate());
   const [session, setSession] = useState<ResistanceSession>(defaultSession());
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
@@ -205,43 +250,6 @@ export default function WorkoutTrackerApp() {
           setHistoryRequestedCount(0);
           setHistoryLoading(false);
 
-          const alignWeeklyToCurrentWeek = (incomingWeekly: WeeklyPlan, currentMonday: Date, currentWeekISO: string) => {
-            let normalized = normalizeWeekly({
-              ...incomingWeekly,
-              customTypes: ensureUniqueTypes(incomingWeekly.customTypes || []),
-              weekOfISO: currentWeekISO,
-            } as WeeklyPlan);
-
-            const currentWeekDates = weekDates(currentMonday).map(d => toISO(d));
-            const existingDates = normalized.days.map(d => d.dateISO);
-
-            if (!arraysEqual(currentWeekDates, existingDates)) {
-              const newDays = currentWeekDates.map(dateISO => {
-                const existingDay = normalized.days.find(d => d.dateISO === dateISO);
-                return existingDay || {
-                  dateISO,
-                  types: {},
-                  sessions: 0,
-                  sessionsList: [],
-                  comments: {},
-                };
-              });
-              normalized = { ...normalized, days: newDays };
-            }
-
-            if (!normalized.customTypes || normalized.customTypes.length === 0) {
-              const globals = loadGlobalTypes();
-              const categories = loadTypeCategories();
-              normalized = normalizeWeekly({
-                ...normalized,
-                customTypes: globals,
-                typeCategories: { ...(normalized.typeCategories || {}), ...(categories || {}) },
-              } as WeeklyPlan);
-            }
-
-            return normalized;
-          };
-
           try {
             const profileRef = doc(db, 'users', u.uid, 'profile', 'info');
             const profileSnap = await getDoc(profileRef);
@@ -257,19 +265,26 @@ export default function WorkoutTrackerApp() {
             setUserName(u.displayName || u.email?.split('@')[0] || 'User');
           }
 
-          let loadedProgramStartDate = programStartDate;
+          let loadedProgramStartDate = getDefaultProgramStartDate();
           try {
             const programRef = doc(db, 'users', u.uid, 'settings', 'program');
             const pSnap = await getDoc(programRef);
             if (pSnap.exists()) {
               const data = pSnap.data() as any;
-              if (data?.programStartDate) {
+              if (isISODate(data?.programStartDate)) {
                 loadedProgramStartDate = data.programStartDate;
                 setProgramStartDate(data.programStartDate);
+              } else {
+                setProgramStartDate(loadedProgramStartDate);
+                await setDoc(programRef, { programStartDate: loadedProgramStartDate }, { merge: true });
               }
+            } else {
+              setProgramStartDate(loadedProgramStartDate);
+              await setDoc(programRef, { programStartDate: loadedProgramStartDate }, { merge: true });
             }
           } catch (e) {
             console.warn('[WT] Failed to load program settings first', e);
+            setProgramStartDate(loadedProgramStartDate);
           }
 
           const historyPlan = buildHistoryPlan(loadedProgramStartDate);
@@ -532,6 +547,44 @@ export default function WorkoutTrackerApp() {
 
   const loadMoreHistory = () => {
     setHistoryRequestedCount((prev) => Math.min(historyWeekIsos.length, prev + HISTORY_LOAD_INCREMENT));
+  };
+
+  const startFreshFromCurrentWeek = async () => {
+    const currentMonday = getMonday();
+    const newStartDate = toISO(currentMonday);
+    const historyPlan = buildHistoryPlan(newStartDate);
+    const currentWeekISO = toISO(currentMonday);
+    const freshWeekly = {
+      ...alignWeeklyToCurrentWeek(weekly, currentMonday, currentWeekISO),
+      weekNumber: historyPlan.currentWeekNumber,
+    };
+
+    setProgramStartDate(newStartDate);
+    setHistoryStartMondayISO(historyPlan.startMondayISO);
+    setHistoryWeekIsos(historyPlan.previousWeekIsos);
+    setHistoryRequestedCount(Math.min(INITIAL_HISTORY_PRIORITY_COUNT, historyPlan.previousWeekIsos.length));
+    setHistoryLoading(false);
+    setPreviousWeeks([]);
+    setWeekly(freshWeekly);
+
+    if (userId) {
+      try {
+        await setDoc(doc(db, 'users', userId, 'settings', 'program'), {
+          programStartDate: newStartDate,
+          updatedAt: Date.now(),
+        }, { merge: true });
+        await setDoc(doc(db, 'users', userId, 'state', currentWeekISO), {
+          weekly: freshWeekly,
+          session,
+        }, { merge: true });
+      } catch (e) {
+        console.error('Failed to start fresh:', e);
+        appToasts.push('Failed to start fresh', 'error');
+        return;
+      }
+    }
+
+    appToasts.push('Started fresh at Week 1', 'success');
   };
 
   // Initialize audio context on user interaction
@@ -821,7 +874,7 @@ export default function WorkoutTrackerApp() {
           setWeekly={setWeekly}
           push={appToasts.push}
           programStartDate={programStartDate}
-          setProgramStartDate={setProgramStartDate}
+          onStartFresh={startFreshFromCurrentWeek}
           previousWeeks={previousWeeks}
         />
 
