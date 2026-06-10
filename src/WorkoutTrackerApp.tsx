@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, setDoc } from "firebase/firestore";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -54,6 +54,16 @@ function getWeekNumberFromStart(weekOfISO: string, startMondayISO: string) {
 
 function isISODate(value: unknown): value is string {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+async function findEarliestStoredWeek(userId: string) {
+  const stateSnapshot = await getDocs(collection(db, 'users', userId, 'state'));
+  const datedWeeks = stateSnapshot.docs
+    .map((stateDoc) => stateDoc.id)
+    .filter(isISODate)
+    .sort();
+
+  return datedWeeks[0] || null;
 }
 
 function buildHistoryPlan(programStartDate: string) {
@@ -273,14 +283,35 @@ export default function WorkoutTrackerApp() {
               const data = pSnap.data() as any;
               if (isISODate(data?.programStartDate)) {
                 loadedProgramStartDate = data.programStartDate;
-                setProgramStartDate(data.programStartDate);
-              } else {
+                const wasExplicitlyReset = typeof data?.updatedAt === 'number';
+                if (!wasExplicitlyReset && data.programStartDate === getDefaultProgramStartDate()) {
+                  const earliestStoredWeek = await findEarliestStoredWeek(u.uid);
+                  if (earliestStoredWeek && earliestStoredWeek < data.programStartDate) {
+                    loadedProgramStartDate = earliestStoredWeek;
+                    await setDoc(programRef, {
+                      programStartDate: earliestStoredWeek,
+                      inferredFromHistory: true,
+                    }, { merge: true });
+                  }
+                }
                 setProgramStartDate(loadedProgramStartDate);
-                await setDoc(programRef, { programStartDate: loadedProgramStartDate }, { merge: true });
+              } else {
+                const earliestStoredWeek = await findEarliestStoredWeek(u.uid);
+                loadedProgramStartDate = earliestStoredWeek || loadedProgramStartDate;
+                setProgramStartDate(loadedProgramStartDate);
+                await setDoc(programRef, {
+                  programStartDate: loadedProgramStartDate,
+                  inferredFromHistory: !!earliestStoredWeek,
+                }, { merge: true });
               }
             } else {
+              const earliestStoredWeek = await findEarliestStoredWeek(u.uid);
+              loadedProgramStartDate = earliestStoredWeek || loadedProgramStartDate;
               setProgramStartDate(loadedProgramStartDate);
-              await setDoc(programRef, { programStartDate: loadedProgramStartDate }, { merge: true });
+              await setDoc(programRef, {
+                programStartDate: loadedProgramStartDate,
+                inferredFromHistory: !!earliestStoredWeek,
+              }, { merge: true });
             }
           } catch (e) {
             console.warn('[WT] Failed to load program settings first', e);
@@ -571,6 +602,7 @@ export default function WorkoutTrackerApp() {
       try {
         await setDoc(doc(db, 'users', userId, 'settings', 'program'), {
           programStartDate: newStartDate,
+          inferredFromHistory: false,
           updatedAt: Date.now(),
         }, { merge: true });
         await setDoc(doc(db, 'users', userId, 'state', currentWeekISO), {

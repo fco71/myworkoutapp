@@ -479,14 +479,14 @@ export function WeeklyTracker({
           <table className="min-w-full border-separate border-spacing-0">
             <thead>
               <tr>
-                <th className="sticky left-0 z-10 bg-white text-left p-1 sm:p-2 border-b text-sm min-w-[80px]">Type</th>
+                <th className="sticky left-0 z-10 min-w-[80px] border-b bg-white p-1 text-left text-sm">Type</th>
                 {weekly.days.map((d) => {
                   const isToday = d.dateISO === todayISO;
                   return (
                   <th
                     key={d.dateISO}
                     className={cn(
-                      "min-w-[48px] border-b p-1 text-center text-xs font-medium sm:min-w-[54px] sm:p-2",
+                      "min-w-[42px] border-b p-1 text-center text-xs font-medium sm:min-w-[46px]",
                       isToday && "bg-blue-50 text-blue-700"
                     )}
                   >
@@ -497,8 +497,8 @@ export function WeeklyTracker({
                   </th>
                   );
                 })}
-                <th className="p-1 sm:p-2 text-left border-b text-xs sm:text-sm">Total</th>
-                <th className="p-1 sm:p-2 text-left border-b text-xs sm:text-sm">Goal</th>
+                <th className="border-b p-1 text-left text-xs sm:text-sm">Total</th>
+                <th className="border-b p-1 text-left text-xs sm:text-sm">Goal</th>
               </tr>
             </thead>
             <tbody>
@@ -506,7 +506,7 @@ export function WeeklyTracker({
                 const hit = counts[t] >= (weekly.benchmarks[t] ?? 0);
                 return (
                   <tr key={t} className="group/row transition-colors hover:bg-slate-50/80">
-                    <td className="sticky left-0 z-10 bg-white p-1 sm:p-2 font-medium border-b text-sm">
+                    <td className="sticky left-0 z-10 border-b bg-white p-1 text-sm font-medium">
                       <div className="flex items-center justify-between">
                         <span className={hit ? 'text-green-700' : ''}>{t}</span>
                         <div className="flex gap-1 opacity-60 hover:opacity-100">
@@ -561,23 +561,22 @@ export function WeeklyTracker({
                         <td
                           key={`${d.dateISO}-${t}`}
                           className={cn(
-                            "relative border-b p-1 text-center align-middle transition-colors sm:p-2",
-                            isToday && "bg-blue-50/60",
-                            active && "bg-emerald-50/40"
+                            "relative border-b p-0.5 text-center align-middle transition-colors sm:p-1",
+                            isToday && "bg-blue-50/50"
                           )}
                         >
-                          <div className="flex min-h-[52px] flex-col items-center justify-center gap-1">
+                          <div className="flex min-h-[40px] items-center justify-center">
                             <button
                               type="button"
                               aria-label={`${active ? 'Remove' : 'Log'} ${t} for ${new Date(d.dateISO + 'T00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}`}
                               aria-pressed={active}
                               title={active ? 'Activity logged. Click to remove.' : 'Click to log activity'}
                               className={cn(
-                                "flex h-10 w-10 shrink-0 items-center justify-center rounded-md border-2 transition-all duration-150",
+                                "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors duration-150",
                                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2",
                                 active
-                                  ? "border-emerald-300 bg-emerald-50 text-emerald-700 shadow-sm hover:border-emerald-400 hover:bg-emerald-100"
-                                  : "border-slate-300 bg-white text-slate-400 shadow-sm hover:-translate-y-0.5 hover:border-blue-500 hover:bg-blue-50 hover:text-blue-600 hover:shadow-md"
+                                  ? "border-emerald-300 bg-emerald-50/70 text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100/70"
+                                  : "border-slate-300 bg-white text-slate-400 hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-600"
                               )}
                               onClick={async () => {
                               const days = [...weekly.days];
@@ -644,9 +643,9 @@ export function WeeklyTracker({
                               }}
                             >
                               {active ? (
-                                <Check className="h-5 w-5 stroke-[2.25]" />
+                                <Check className="h-4 w-4 stroke-2" />
                               ) : (
-                                <Plus className="h-5 w-5 stroke-[2.5]" />
+                                <Plus className="h-4 w-4 stroke-2" />
                               )}
                             </button>
 
@@ -655,7 +654,7 @@ export function WeeklyTracker({
                               size="sm"
                               variant="ghost"
                               className={cn(
-                                "h-5 w-5 rounded-full p-0 text-slate-400 opacity-40 transition-all hover:bg-blue-100 hover:text-blue-600 hover:opacity-100",
+                                "absolute bottom-0.5 right-0.5 h-4 w-4 rounded p-0 text-slate-400 opacity-25 transition-colors hover:bg-blue-50 hover:text-blue-600 hover:opacity-100",
                                 d.comments?.[t] && "bg-blue-100 text-blue-600 opacity-100"
                               )}
                               onClick={(e) => {
@@ -664,24 +663,24 @@ export function WeeklyTracker({
                               }}
                               title={d.comments?.[t] ? `Comment: ${d.comments[t]}` : "Add comment"}
                             >
-                              <MessageSquare className="h-3 w-3" />
+                              <MessageSquare className="h-2.5 w-2.5" />
                             </Button>
                           </div>
                         </td>
                       );
                     })}
-                    <td className="p-2 border-b font-semibold">
+                    <td className="border-b p-1 font-semibold">
                       {(() => {
                         const n = Math.min(7, counts[t]);
                         return <span>{n} <span className="text-[10px] text-neutral-500">{n === 1 ? 'day' : 'days'}</span></span>;
                       })()}
                     </td>
-                    <td className="p-2 border-b">
+                    <td className="border-b p-1">
                       <div className="flex items-center gap-2">
                         <Input
                           type="number"
                           className={cn(
-                            "w-20",
+                            "h-8 w-16 px-2",
                             hit && "bg-green-50 border-green-400 text-green-900"
                           )}
                           value={weekly.benchmarks[t] ?? 0}

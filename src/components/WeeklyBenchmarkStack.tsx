@@ -78,13 +78,13 @@ function PreviousWeekTracker({
         <table className="w-full border-collapse">
           <thead>
             <tr>
-              <th className="text-left p-3 border-b font-medium text-gray-700">Workout Type</th>
+              <th className="border-b p-2 text-left font-medium text-gray-700">Workout Type</th>
               {weekly.days.map((day, dayIndex) => {
                 const date = new Date(day.dateISO + 'T00:00');
                 const isToday = day.dateISO === today;
 
                 return (
-                  <th key={dayIndex} className={`text-center p-3 border-b font-medium min-w-[100px] ${
+                  <th key={dayIndex} className={`min-w-[80px] border-b p-2 text-center font-medium ${
                     isToday ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
                   }`}>
                     <div className="text-xs">{date.toLocaleDateString(undefined, { weekday: "short" })}</div>
@@ -99,7 +99,7 @@ function PreviousWeekTracker({
           <tbody>
             {types.map((type, typeIndex) => (
               <tr key={typeIndex} className="hover:bg-gray-50">
-                <td className="p-3 border-b font-medium text-gray-800">
+                <td className="border-b p-2 font-medium text-gray-800">
                   {type}
                 </td>
                 {weekly.days.map((day, dayIndex) => {
@@ -109,26 +109,26 @@ function PreviousWeekTracker({
                   const date = new Date(day.dateISO + 'T00:00');
 
                   return (
-                    <td key={dayIndex} className={`border-b p-3 text-center transition-colors ${
+                    <td key={dayIndex} className={`relative border-b p-1.5 text-center transition-colors ${
                       isToday ? 'bg-blue-50/70' : ''
                     }`}>
-                      <div className="flex flex-col items-center gap-1">
+                      <div className="flex min-h-[40px] items-center justify-center">
                         <button
                           type="button"
                           onClick={() => toggleWorkout(dayIndex, type)}
                           aria-label={`${isChecked ? 'Remove' : 'Log'} ${type} for ${date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}`}
                           aria-pressed={isChecked}
-                          className={`flex h-10 w-10 items-center justify-center rounded-md border-2 shadow-sm transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
+                          className={`flex h-8 w-8 items-center justify-center rounded-md border transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
                             isChecked
-                              ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100'
-                              : 'border-slate-300 bg-white text-slate-400 hover:-translate-y-0.5 hover:border-blue-500 hover:bg-blue-50 hover:text-blue-600 hover:shadow-md'
+                              ? 'border-emerald-300 bg-emerald-50/70 text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100/70'
+                              : 'border-slate-300 bg-white text-slate-400 hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-600'
                           }`}
                           title={isChecked ? 'Activity logged. Click to remove.' : 'Click to log activity'}
                         >
                           {isChecked ? (
-                            <Check className="h-5 w-5 stroke-[2.25]" />
+                            <Check className="h-4 w-4 stroke-2" />
                           ) : (
-                            <Plus className="h-5 w-5 stroke-[2.5]" />
+                            <Plus className="h-4 w-4 stroke-2" />
                           )}
                         </button>
 
@@ -137,11 +137,11 @@ function PreviousWeekTracker({
                           onClick={(e) => { e.stopPropagation(); openCommentModal(type, dayIndex); }}
                           title={hasComment ? `Comment: ${day.comments?.[type]}` : 'Add comment'}
                           className={cn(
-                            "flex h-5 w-5 items-center justify-center rounded-full text-slate-400 opacity-40 transition-all hover:bg-blue-100 hover:text-blue-600 hover:opacity-100",
+                            "absolute bottom-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded text-slate-400 opacity-25 transition-colors hover:bg-blue-50 hover:text-blue-600 hover:opacity-100",
                             hasComment && "bg-blue-100 text-blue-600 opacity-100"
                           )}
                         >
-                          <MessageSquare className="w-3 h-3" />
+                          <MessageSquare className="h-2.5 w-2.5" />
                         </button>
                       </div>
                     </td>
