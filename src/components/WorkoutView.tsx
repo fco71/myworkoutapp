@@ -712,22 +712,35 @@ export function WorkoutView({
   useEffect(() => {
     const syncTimer = () => {
       if (session.startedAt && !session.completed) {
-        setTimerSec(getCappedWorkoutDuration(session, timerSec));
+        setTimerSec((current) => getCappedWorkoutDuration(session, current));
         return;
       }
 
       setTimerSec(session.durationSec || 0);
     };
 
+    const syncVisibleTimer = () => {
+      if (!document.hidden) syncTimer();
+    };
+
     syncTimer();
 
-    if (!session.startedAt || session.completed || hasReachedWorkoutCutoff(session, timerSec)) {
+    if (!session.startedAt || session.completed || hasReachedWorkoutCutoff(session, session.durationSec || 0)) {
       return;
     }
 
     const id = window.setInterval(syncTimer, 1000);
-    return () => window.clearInterval(id);
-  }, [session.startedAt, session.durationSec, session.completed, timerSec]);
+    document.addEventListener('visibilitychange', syncVisibleTimer);
+    window.addEventListener('focus', syncTimer);
+    window.addEventListener('pageshow', syncTimer);
+
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', syncVisibleTimer);
+      window.removeEventListener('focus', syncTimer);
+      window.removeEventListener('pageshow', syncTimer);
+    };
+  }, [session.startedAt, session.durationSec, session.completed]);
   const totalStats = useMemo(() => {
     const totalExercises = session.exercises.length;
     const totalSets = session.exercises.reduce((a, e) => a + e.sets.filter(s => (s || 0) > 0).length, 0);

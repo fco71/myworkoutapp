@@ -30,6 +30,7 @@ import { WeeklyTracker } from "@/components/WeeklyTracker";
 import { WorkoutView } from "@/components/WorkoutView";
 import { HistoryView } from "@/components/HistoryView";
 import { LibraryView } from "@/components/LibraryView";
+import { getRemainingSeconds } from "@/logic/timer";
 
 // Expose Firebase objects globally for console access
 (window as any).appAuth = auth;
@@ -38,6 +39,63 @@ import { LibraryView } from "@/components/LibraryView";
 const INITIAL_HISTORY_PRIORITY_COUNT = 1;
 const RECENT_HISTORY_PREFETCH_COUNT = 5;
 const HISTORY_LOAD_INCREMENT = 4;
+const DEFAULT_REST_DURATION_SEC = 90;
+const LS_COUNTDOWN = 'workout:last_countdown_sec';
+const LS_COUNTDOWN_END_AT = 'workout:countdown_end_at';
+
+type StoredRestTimer = {
+  endAt: number | null;
+  remainingSec: number;
+  running: boolean;
+};
+
+function readStoredPositiveInt(key: string) {
+  try {
+    const value = Number.parseInt(window.localStorage.getItem(key) || '', 10);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function getPreferredRestDuration() {
+  return readStoredPositiveInt(LS_COUNTDOWN) || DEFAULT_REST_DURATION_SEC;
+}
+
+function persistRestDuration(seconds: number) {
+  try {
+    window.localStorage.setItem(LS_COUNTDOWN, String(seconds));
+  } catch {
+    // Storage can be unavailable in Safari private browsing.
+  }
+}
+
+function persistRestTimerEnd(endAt: number | null) {
+  try {
+    if (endAt === null) {
+      window.localStorage.removeItem(LS_COUNTDOWN_END_AT);
+    } else {
+      window.localStorage.setItem(LS_COUNTDOWN_END_AT, String(endAt));
+    }
+  } catch {
+    // The in-memory deadline still keeps the timer accurate.
+  }
+}
+
+function readStoredRestTimer(): StoredRestTimer {
+  const preferredSec = getPreferredRestDuration();
+  const endAt = readStoredPositiveInt(LS_COUNTDOWN_END_AT);
+
+  if (endAt !== null) {
+    const remainingSec = getRemainingSeconds(endAt);
+    if (remainingSec > 0) {
+      return { endAt, remainingSec, running: true };
+    }
+    persistRestTimerEnd(null);
+  }
+
+  return { endAt: null, remainingSec: preferredSec, running: false };
+}
 
 const sortWeeksNewestFirst = (a: WeeklyPlan, b: WeeklyPlan) =>
   new Date(b.weekOfISO).getTime() - new Date(a.weekOfISO).getTime();
@@ -657,85 +715,82 @@ export default function WorkoutTrackerApp() {
   }, [userId, weekly, session]);
 
   // Global floating countdown timer
-  const LS_COUNTDOWN = 'workout:last_countdown_sec';
-
-  // Initialize with last used value from localStorage
-  const [countdownSec, setCountdownSec] = useState<number>(() => {
-    try {
-      const raw = localStorage.getItem(LS_COUNTDOWN);
-      if (raw) {
-        const v = parseInt(raw || '0');
-        if (!isNaN(v) && v > 0) return v;
-      }
-    } catch (e) { /* ignore */ }
-    return 90; // Default to 1:30
-  });
-  const [countdownRunning, setCountdownRunning] = useState(false);
+  const [storedRestTimer] = useState(readStoredRestTimer);
+  const [countdownSec, setCountdownSec] = useState(storedRestTimer.remainingSec);
+  const [countdownEndAt, setCountdownEndAt] = useState<number | null>(storedRestTimer.endAt);
+  const [countdownRunning, setCountdownRunning] = useState(storedRestTimer.running);
   const [showCountdownModal, setShowCountdownModal] = useState(false);
+  const completedCountdownEndAtRef = useRef<number | null>(null);
   const formattedCountdown = `${Math.floor(countdownSec / 60)}:${String(countdownSec % 60).padStart(2, '0')}`;
   const showFloatingRestTimer = activeTab === 'workout' || countdownRunning;
 
-  const getPreferredRestDuration = () => {
-    try {
-      const raw = localStorage.getItem(LS_COUNTDOWN);
-      if (raw) {
-        const saved = parseInt(raw, 10);
-        if (!isNaN(saved) && saved > 0) return saved;
-      }
-    } catch (e) { /* ignore */ }
-    return 90;
-  };
-
-  const persistRestDuration = (seconds: number) => {
-    try {
-      localStorage.setItem(LS_COUNTDOWN, String(seconds));
-    } catch (e) { /* ignore */ }
+  const startRestTimer = (durationSec: number) => {
+    const endAt = Date.now() + durationSec * 1000;
+    completedCountdownEndAtRef.current = null;
+    persistRestTimerEnd(endAt);
+    setCountdownSec(durationSec);
+    setCountdownEndAt(endAt);
+    setCountdownRunning(true);
+    setShowCountdownModal(false);
   };
 
   const quickStartRestTimer = () => {
-    const duration = getPreferredRestDuration();
-    setCountdownSec(duration);
-    setCountdownRunning(true);
-    setShowCountdownModal(false);
+    startRestTimer(getPreferredRestDuration());
   };
 
   const startConfiguredRestTimer = () => {
     if (countdownSec <= 0) return;
     persistRestDuration(countdownSec);
-    setCountdownRunning(true);
-    setShowCountdownModal(false);
+    startRestTimer(countdownSec);
   };
 
   const stopRestTimer = () => {
+    persistRestTimerEnd(null);
+    setCountdownEndAt(null);
     setCountdownRunning(false);
     setCountdownSec(getPreferredRestDuration());
     setShowCountdownModal(false);
   };
 
   useEffect(() => {
-    if (!countdownRunning) return;
-    const id = setInterval(() => {
-      setCountdownSec((s) => {
-        if (s <= 1) {
-          setCountdownRunning(false);
-          playBeep();
-          // Restore to saved preference when timer finishes
-          try {
-            const raw = localStorage.getItem(LS_COUNTDOWN);
-            if (raw) {
-              const saved = parseInt(raw);
-              if (!isNaN(saved) && saved > 0) {
-                return saved;
-              }
-            }
-          } catch (e) { /* ignore */ }
-          return 90; // Default to 1:30 if no saved preference
-        }
-        return s - 1;
-      });
-    }, 1000);
-    return () => clearInterval(id);
-  }, [countdownRunning]);
+    if (!countdownRunning || countdownEndAt === null) return;
+
+    const finishTimer = () => {
+      if (completedCountdownEndAtRef.current === countdownEndAt) return;
+      completedCountdownEndAtRef.current = countdownEndAt;
+      persistRestTimerEnd(null);
+      setCountdownEndAt(null);
+      setCountdownRunning(false);
+      setCountdownSec(getPreferredRestDuration());
+      void playBeep();
+    };
+
+    const syncTimer = () => {
+      const remainingSec = getRemainingSeconds(countdownEndAt);
+      if (remainingSec === 0) {
+        finishTimer();
+        return;
+      }
+      setCountdownSec((current) => current === remainingSec ? current : remainingSec);
+    };
+
+    const syncVisibleTimer = () => {
+      if (!document.hidden) syncTimer();
+    };
+
+    syncTimer();
+    const id = window.setInterval(syncTimer, 1000);
+    document.addEventListener('visibilitychange', syncVisibleTimer);
+    window.addEventListener('focus', syncTimer);
+    window.addEventListener('pageshow', syncTimer);
+
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', syncVisibleTimer);
+      window.removeEventListener('focus', syncTimer);
+      window.removeEventListener('pageshow', syncTimer);
+    };
+  }, [countdownRunning, countdownEndAt]);
 
   return (
   <div className="relative z-10 min-h-screen overflow-x-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 px-4 py-6 text-slate-900 sm:p-6">
@@ -1056,7 +1111,15 @@ export default function WorkoutTrackerApp() {
               </div>
               <div className="flex gap-2 mt-3 flex-wrap">
                 {[30,60,90,120,180].map(s => (
-                  <Button key={s} variant="outline" onClick={() => { setCountdownSec(s); persistRestDuration(s); }} className="flex-shrink-0">{`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`}</Button>
+                  <Button
+                    key={s}
+                    variant="outline"
+                    onClick={() => { setCountdownSec(s); persistRestDuration(s); }}
+                    className="flex-shrink-0"
+                    disabled={countdownRunning}
+                  >
+                    {`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`}
+                  </Button>
                 ))}
               </div>
               <div className="flex justify-end gap-2 mt-4">
