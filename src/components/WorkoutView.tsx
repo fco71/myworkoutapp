@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { auth, db } from "@/lib/firebase";
 import { doc, setDoc, collection, addDoc, getDocs, deleteDoc, getDoc } from "firebase/firestore";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
@@ -51,6 +52,10 @@ function getExerciseProgress(exercise: ResistanceExercise) {
   };
 }
 
+function hasPerformedExercise(exercise: { sets?: number[] }) {
+  return (exercise.sets || []).some((reps) => (reps || 0) > 0);
+}
+
 function formatDuration(totalSeconds: number) {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -95,10 +100,14 @@ function ExerciseCard({
   onDelete: () => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [notesDraft, setNotesDraft] = useState(ex.notes || "");
+  const [notesDraft, setNotesDraft] = useState("");
   const intensityAutoFilled = useRef(false);
   const setOK = (rep: number) => rep >= ex.targetReps;
   const { sum, totalTarget, goalMet, progressPercent } = getExerciseProgress(ex);
+  const savedNotes = (ex.notes || "")
+    .split(/\n+/)
+    .map((note) => note.trim())
+    .filter(Boolean);
 
   // Exercise history state
   const [exerciseHistory, setExerciseHistory] = useState<{lastWorkout?: any; personalRecord?: any; recentWorkouts?: any[]}>({});
@@ -242,11 +251,13 @@ function ExerciseCard({
           }).filter(Boolean);
 
 
-          // Find last workout (most recent completed)
-          const lastWorkout = exerciseInstances[0];
+          const performedExerciseInstances = exerciseInstances.filter(hasPerformedExercise);
+
+          // Find last workout where this exercise was actually performed.
+          const lastWorkout = performedExerciseInstances[0];
 
           // Find personal record (highest total reps)
-          const personalRecord = exerciseInstances.reduce((best: any, current: any) => {
+          const personalRecord = performedExerciseInstances.reduce((best: any, current: any) => {
             const currentTotal = (current.sets || []).reduce((sum: number, reps: number) => sum + reps, 0);
             const bestTotal = (best?.sets || []).reduce((sum: number, reps: number) => sum + reps, 0);
             return currentTotal > bestTotal ? current : best;
@@ -254,7 +265,7 @@ function ExerciseCard({
 
           // Get recent workouts (last 5 completed sessions, excluding duplicates)
           const uniqueSessions = new Map();
-          exerciseInstances.forEach((instance: any) => {
+          performedExerciseInstances.forEach((instance: any) => {
             const key = `${instance.sessionId}-${instance.sessionDate.getTime()}`;
             if (!uniqueSessions.has(key)) {
               uniqueSessions.set(key, instance);
@@ -313,6 +324,14 @@ function ExerciseCard({
   const { lastWorkout, personalRecord, recentWorkouts } = exerciseHistory;
   const hasHistory = lastWorkout || personalRecord || (recentWorkouts && recentWorkouts.length > 0);
   const hasExtendedHistory = Boolean((recentWorkouts && recentWorkouts.length > 1) || personalRecord);
+  const saveNote = () => {
+    const nextNote = notesDraft.trim();
+    if (!nextNote) return;
+
+    const existingNotes = (ex.notes || "").trim();
+    updateExercise(ex.id, { notes: existingNotes ? `${existingNotes}\n${nextNote}` : nextNote });
+    setNotesDraft("");
+  };
 
   return (
     <Card
@@ -333,7 +352,7 @@ function ExerciseCard({
                     goalMet ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"
                   )}
                 >
-                  {goalMet ? "On target" : "In progress"}
+                  {goalMet ? "On target" : "Not complete"}
                 </span>
                 <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
                   {ex.sets.filter(s => (s || 0) > 0).length} of {ex.sets.length} sets logged
@@ -502,6 +521,15 @@ function ExerciseCard({
             <MessageSquare className="h-4 w-4 text-slate-500" />
             <span className="text-sm font-semibold text-slate-800">Notes and cues</span>
           </div>
+          {savedNotes.length > 0 ? (
+            <div className="mb-3 space-y-2">
+              {savedNotes.map((note, index) => (
+                <div key={`${index}-${note}`} className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                  {note}
+                </div>
+              ))}
+            </div>
+          ) : null}
           <div className="flex gap-2">
             <Input
               placeholder="Add form cues, weight used, or quick reminders for next time"
@@ -509,15 +537,16 @@ function ExerciseCard({
               onChange={(e) => setNotesDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
-                  updateExercise(ex.id, { notes: notesDraft });
+                  e.preventDefault();
+                  saveNote();
                 }
               }}
               className="border-slate-200 bg-slate-50"
             />
-            {notesDraft !== (ex.notes || "") && (
+            {notesDraft.trim() && (
               <button
                 type="button"
-                onClick={() => updateExercise(ex.id, { notes: notesDraft })}
+                onClick={saveNote}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white shadow-sm transition hover:bg-emerald-600"
                 title="Save note"
               >
@@ -636,7 +665,7 @@ export function WorkoutView({
   userName,
 }: {
   session: ResistanceSession;
-  setSession: (s: ResistanceSession) => void;
+  setSession: Dispatch<SetStateAction<ResistanceSession>>;
   weekly: WeeklyPlan;
   setWeekly: (w: WeeklyPlan) => void;
   userName: string | null;
@@ -656,6 +685,14 @@ export function WorkoutView({
   const workoutActive = Boolean(session.startedAt && !session.completed);
   const displayedTimerSec = workoutActive ? getCappedWorkoutDuration(session, timerSec) : timerSec;
   const workoutAutoCutoffReached = hasReachedWorkoutCutoff(session, timerSec);
+  const canFinishWorkout = !session.completed && workoutActive;
+  const canDiscardWorkout = !session.completed && (
+    workoutActive ||
+    (session.durationSec || 0) > 0 ||
+    session.exercises.length > 0 ||
+    Boolean(session.sourceTemplateId) ||
+    session.sessionName.trim() !== "Workout"
+  );
 
   // initialize whether current session (template) is favorited by the user
   useEffect(() => {
@@ -700,14 +737,16 @@ export function WorkoutView({
   }, [session.sourceTemplateId]);
 
   useEffect(() => {
-    // keep session.durationSec in sync while editing
-    // Guard so we don't overwrite the session when parent intentionally resets it
-    const currentDuration = session.durationSec || 0;
-    if (timerSec !== currentDuration) {
-      setSession({ ...session, durationSec: timerSec });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timerSec]);
+    // Keep elapsed duration in sync without writing through a stale session object.
+    setSession((current) => {
+      if (!current.startedAt || current.completed) return current;
+
+      const nextDurationSec = Math.min(WORKOUT_AUTO_CUTOFF_SEC, timerSec);
+      if ((current.durationSec || 0) === nextDurationSec) return current;
+
+      return { ...current, durationSec: nextDurationSec };
+    });
+  }, [timerSec, setSession]);
 
   useEffect(() => {
     const syncTimer = () => {
@@ -776,9 +815,32 @@ export function WorkoutView({
       completed: false,
       durationSec: 0,
       startedAt: Date.now(),
+      completedAt: undefined,
       dateISO: toISO(new Date()),
     });
     toasts.push('Workout duration started.', 'success');
+  };
+
+  const stopWorkoutTimer = () => {
+    setTimerSec(0);
+    setSession({
+      ...session,
+      completed: false,
+      durationSec: 0,
+      startedAt: undefined,
+      completedAt: undefined,
+    });
+    toasts.push('Workout timer stopped. The draft was not saved as complete.', 'info');
+  };
+
+  const discardCurrentWorkout = () => {
+    if (!window.confirm('Discard the current workout draft? This will not delete completed history.')) {
+      return;
+    }
+
+    setTimerSec(0);
+    setSession(defaultSession());
+    toasts.push('Current workout draft discarded.', 'success');
   };
 
   const startBlankWorkout = () => {
@@ -1282,6 +1344,26 @@ export function WorkoutView({
                   <Plus className="mr-2 h-4 w-4" />
                   Add exercise
                 </Button>
+                {workoutActive ? (
+                  <Button
+                    variant="outline"
+                    onClick={stopWorkoutTimer}
+                    className="justify-start border-amber-200 bg-white text-amber-700 hover:bg-amber-50"
+                  >
+                    <X className="mr-2 h-4 w-4" />
+                    Stop timer
+                  </Button>
+                ) : null}
+                {canDiscardWorkout ? (
+                  <Button
+                    variant="outline"
+                    onClick={discardCurrentWorkout}
+                    className="justify-start border-rose-200 bg-white text-rose-700 hover:bg-rose-50"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Discard workout
+                  </Button>
+                ) : null}
               </div>
 
               <div className="rounded-3xl bg-slate-50 p-4">
@@ -1359,7 +1441,27 @@ export function WorkoutView({
               <Plus className="mr-2 h-4 w-4" />
               Add exercise
             </Button>
-            {!session.completed ? (
+            {workoutActive ? (
+              <Button
+                variant="outline"
+                onClick={stopWorkoutTimer}
+                className="border-amber-200 bg-white text-amber-700 hover:bg-amber-50"
+              >
+                <X className="mr-2 h-4 w-4" />
+                Stop timer
+              </Button>
+            ) : null}
+            {canDiscardWorkout ? (
+              <Button
+                variant="outline"
+                onClick={discardCurrentWorkout}
+                className="border-rose-200 bg-white text-rose-700 hover:bg-rose-50"
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Discard workout
+              </Button>
+            ) : null}
+            {canFinishWorkout ? (
               <Button onClick={completeWorkout} className="bg-emerald-500 text-white hover:bg-emerald-600">
                 <Check className="mr-2 h-4 w-4" />
                 Finish & save workout
@@ -1409,7 +1511,7 @@ export function WorkoutView({
               <Button onClick={() => {
                 const found = routines.find((x) => x.id === selectedRoutineId);
                 if (!found) return toasts.push('Select a routine', 'info');
-                const exercises = (found.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, intensity: e.intensity ?? "", sets: Array(e.minSets).fill(0), notes: e.notes || "" }));
+                const exercises = (found.exercises || []).map((e: any) => ({ id: crypto.randomUUID(), name: e.name, minSets: e.minSets, targetReps: e.targetReps, intensity: "", sets: Array(e.minSets).fill(0), notes: e.notes || "" }));
                 setSession({
                   ...session,
                   sessionName: found.name,
@@ -1417,12 +1519,14 @@ export function WorkoutView({
                   completed: false,
                   sessionTypes: found.sessionTypes || [],
                   durationSec: 0,
-                  startedAt: Date.now(),
+                  startedAt: undefined,
+                  completedAt: undefined,
+                  sourceTemplateId: found.id,
                   dateISO: toISO(new Date()),
                 });
                 setShowLoadModal(false);
                 setSelectedRoutineId(null);
-                toasts.push(`Loaded "${found.name}" and started workout duration.`, 'success');
+                toasts.push(`Loaded "${found.name}". Press Start when ready.`, 'success');
               }}>Load selected</Button>
             </div>
           </div>

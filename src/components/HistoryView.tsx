@@ -323,14 +323,18 @@ export function HistoryView({
                                         e.stopPropagation();
                                         // Load this session back into the current workout for editing
                                         const editableSession: ResistanceSession = {
-                                          ...session,
-                                          completed: false, // Mark as not completed so it can be edited
                                           dateISO: toISO(new Date()), // Update to today's date
+                                          sessionName: session.sessionName || 'Workout',
+                                          exercises: session.exercises || [],
+                                          completed: false, // Mark as not completed so it can be edited
+                                          sessionTypes: session.sessionTypes || [],
                                           durationSec: 0, // Reset timer
-                                          startedAt: Date.now()
+                                          startedAt: undefined,
+                                          completedAt: undefined,
+                                          sourceTemplateId: session.sourceTemplateId,
                                         };
                                         setSession(editableSession);
-                                        toasts.push('Session loaded for editing', 'success');
+                                        toasts.push('Session loaded for editing. Press Start when ready.', 'success');
                                       }}>
                                         <Edit className="h-3 w-3 mr-1" />
                                         Edit

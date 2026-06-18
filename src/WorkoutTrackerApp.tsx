@@ -62,6 +62,16 @@ function getPreferredRestDuration() {
   return readStoredPositiveInt(LS_COUNTDOWN) || DEFAULT_REST_DURATION_SEC;
 }
 
+function normalizeLoadedSession(incomingSession: ResistanceSession) {
+  if (!incomingSession.startedAt || incomingSession.completed) return incomingSession;
+
+  return {
+    ...incomingSession,
+    durationSec: 0,
+    startedAt: undefined,
+  };
+}
+
 function persistRestDuration(seconds: number) {
   try {
     window.localStorage.setItem(LS_COUNTDOWN, String(seconds));
@@ -402,7 +412,7 @@ export default function WorkoutTrackerApp() {
                 currentWeeklySnapshot = normalized;
                 setWeekly(normalized);
               }
-              if (data?.session) setSession(data.session);
+              if (data?.session) setSession(normalizeLoadedSession(data.session));
             } else {
               const previousWeekISO = historyPlan.previousWeekIsos[0];
               let benchmarksFromPrevWeek: Record<string, number> = {};
@@ -448,7 +458,7 @@ export default function WorkoutTrackerApp() {
                   currentWeeklySnapshot = normalized;
                   setWeekly(normalized);
                 }
-                if (data?.session) setSession(data.session);
+                if (data?.session) setSession(normalizeLoadedSession(data.session));
               } else {
                 const defaultWk = defaultWeekly();
                 if (Object.keys(benchmarksFromPrevWeek).length > 0 || customTypesFromPrevWeek.length > 0) {
@@ -1016,13 +1026,19 @@ export default function WorkoutTrackerApp() {
           <TabsContent value="library" className="mt-4">
             <LibraryView userName={userName} onLoadRoutine={(r, mode) => {
               if (mode === 'append') {
-                setSession((prev) => ({
-                  ...prev,
-                  exercises: [...prev.exercises, ...(r.exercises || [])],
-                  completed: false,
-                } as ResistanceSession));
+                setSession((prev) => {
+                  const keepTimerRunning = Boolean(prev.startedAt && !prev.completed);
+                  return {
+                    ...prev,
+                    exercises: [...prev.exercises, ...(r.exercises || [])],
+                    completed: false,
+                    durationSec: keepTimerRunning ? prev.durationSec : 0,
+                    startedAt: keepTimerRunning ? prev.startedAt : undefined,
+                    completedAt: undefined,
+                  } as ResistanceSession;
+                });
               } else {
-                setSession({ ...r, durationSec: 0, completed: false, startedAt: undefined });
+                setSession({ ...r, durationSec: 0, completed: false, startedAt: undefined, completedAt: undefined });
               }
               setActiveTab('workout');
             }} />
