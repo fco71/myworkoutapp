@@ -92,7 +92,7 @@ export function HistoryView({
             const weeklyTrackerDates = displaySessions.map(s => s.dateISO);
 
             sessions.forEach((fs: any) => {
-              const fsDate = fs.dateISO || (fs.completedAt?.toDate ? fs.completedAt.toDate().toISOString().split('T')[0] : null);
+              const fsDate = fs.dateISO || (fs.completedAt?.toDate ? toISO(fs.completedAt.toDate()) : null);
 
               // Only add Firestore sessions from dates NOT covered by weekly tracker data
               if (fsDate && !weeklyTrackerDates.includes(fsDate)) {
@@ -197,7 +197,8 @@ export function HistoryView({
   const exportCSV = () => {
     const rows: string[][] = [['Date', 'Session', 'Types', 'Exercise', 'Set', 'Reps', 'Duration (min)']];
     items.forEach(item => {
-      const date = item.dateISO || item.completedAt?.toDate?.()?.toISOString?.()?.slice(0,10) || '';
+      const completedAtDate = item.completedAt?.toDate?.();
+      const date = item.dateISO || (completedAtDate ? toISO(completedAtDate) : '');
       const name = item.sessionName || 'Manual';
       const types = (item.sessionTypes || []).join('; ');
       const durationMin = item.durationSec ? Math.round(item.durationSec / 60) : '';
@@ -219,7 +220,7 @@ export function HistoryView({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `workout-history-${new Date().toISOString().slice(0,10)}.csv`;
+    a.download = `workout-history-${toISO(new Date())}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
