@@ -18,11 +18,13 @@ export function HistoryView({
   setWeekly,
   setSession,
   previousWeeks,
+  onOpenWorkoutTab,
 }: {
   weekly: WeeklyPlan;
   setWeekly: (w: WeeklyPlan) => void;
   setSession: (s: ResistanceSession) => void;
   previousWeeks: WeeklyPlan[];
+  onOpenWorkoutTab?: () => void;
 }) {
   const toasts = useToasts();
   const [items, setItems] = useState<any[]>([]);
@@ -39,40 +41,11 @@ export function HistoryView({
         setLoading(true);
         const uid = auth.currentUser?.uid;
 
-        // ALWAYS process weekly tracker data first (works even without authentication)
         let displaySessions: any[] = [];
 
-        // Process ALL weekly data (current week + previous weeks)
-        const allWeeklyData = [weekly, ...previousWeeks];
-
-        allWeeklyData.forEach((weekData) => {
-          weekData.days?.forEach((day: any) => {
-            // Get all active workout types for this day
-            const activeTypes = day.types ? Object.keys(day.types).filter(t => day.types[t]) : [];
-
-            if (activeTypes.length > 0) {
-            }
-
-            if (activeTypes.length > 0) {
-              // Create a single session representing all workout types for the day
-              const sessionData = {
-                id: `daily:${day.dateISO}:${Date.now()}:${Math.random()}`,
-                dateISO: day.dateISO,
-                sessionName: activeTypes.join(' + '),
-                sessionTypes: activeTypes,
-                completed: true,
-                exercises: [],
-                durationSec: 0,
-                completedAt: new Date(day.dateISO + 'T12:00:00'),
-                source: 'weekly_tracker_types'
-              };
-              displaySessions.push(sessionData);
-            }
-          });
-        });
-
-
-        // If authenticated, also load Firestore sessions
+        // Load real saved sessions first — these carry the actual exercises, sets and
+        // intensity, and can be reopened/edited. They take priority over the weekly grid.
+        let firestoreSessions: any[] = [];
         if (uid) {
           try {
             const q = query(
@@ -82,29 +55,53 @@ export function HistoryView({
             );
 
             const snapshot = await getDocs(q);
-            const sessions = snapshot.docs.map(doc => ({
-              id: doc.id,
-              ...doc.data()
-            }));
-
-
-            // Add Firestore sessions, but only if they don't conflict with weekly tracker data
-            const weeklyTrackerDates = displaySessions.map(s => s.dateISO);
-
-            sessions.forEach((fs: any) => {
-              const fsDate = fs.dateISO || (fs.completedAt?.toDate ? toISO(fs.completedAt.toDate()) : null);
-
-              // Only add Firestore sessions from dates NOT covered by weekly tracker data
-              if (fsDate && !weeklyTrackerDates.includes(fsDate)) {
-                displaySessions.push({ ...fs, source: 'firestore' });
-              }
+            firestoreSessions = snapshot.docs.map(doc => {
+              const data: any = doc.data();
+              const dateISO = data.dateISO || (data.completedAt?.toDate ? toISO(data.completedAt.toDate()) : null);
+              return { id: doc.id, ...data, dateISO, source: 'firestore' };
             });
           } catch (error) {
             console.warn('HistoryView: Failed to load Firestore sessions:', error);
           }
-        } else {
         }
 
+        // Which activity types are already represented by a saved session on each date,
+        // so we don't also draw an empty weekly-grid card for the same thing.
+        const coveredTypesByDate = new Map<string, Set<string>>();
+        firestoreSessions.forEach((fs: any) => {
+          if (!fs.dateISO) return;
+          const set = coveredTypesByDate.get(fs.dateISO) || new Set<string>();
+          (fs.sessionTypes || []).forEach((t: string) => set.add(t));
+          coveredTypesByDate.set(fs.dateISO, set);
+        });
+
+        // Synthesize weekly-grid cards only for activity types NOT covered by a saved session
+        // (e.g. a Bike/Cardio tap that never became a full workout). Works without auth too.
+        const allWeeklyData = [weekly, ...previousWeeks];
+        allWeeklyData.forEach((weekData) => {
+          weekData.days?.forEach((day: any) => {
+            const activeTypes = day.types ? Object.keys(day.types).filter(t => day.types[t]) : [];
+            const covered = coveredTypesByDate.get(day.dateISO) || new Set<string>();
+            const remainingTypes = activeTypes.filter(t => !covered.has(t));
+
+            if (remainingTypes.length > 0) {
+              displaySessions.push({
+                id: `daily:${day.dateISO}:${remainingTypes.join('-')}`,
+                dateISO: day.dateISO,
+                sessionName: remainingTypes.join(' + '),
+                sessionTypes: remainingTypes,
+                completed: true,
+                exercises: [],
+                durationSec: 0,
+                completedAt: new Date(day.dateISO + 'T12:00:00'),
+                source: 'weekly_tracker_types'
+              });
+            }
+          });
+        });
+
+        // Append the real saved sessions (with their exercises intact).
+        displaySessions.push(...firestoreSessions);
 
         if (mounted) {
           setItems(displaySessions);
@@ -320,44 +317,52 @@ export function HistoryView({
                                       {session.exercises && session.exercises.length > 0 && (
                                         <div className="text-sm text-neutral-600">{session.exercises.length} exercises</div>
                                       )}
-                                      <Button variant="outline" size="sm" onClick={(e) => {
-                                        e.stopPropagation();
-                                        // Load this session back into the current workout for editing
-                                        const editableSession: ResistanceSession = {
-                                          dateISO: toISO(new Date()), // Update to today's date
-                                          sessionName: session.sessionName || 'Workout',
-                                          exercises: session.exercises || [],
-                                          completed: false, // Mark as not completed so it can be edited
-                                          sessionTypes: session.sessionTypes || [],
-                                          durationSec: 0, // Reset timer
-                                          startedAt: undefined,
-                                          completedAt: undefined,
-                                          sourceTemplateId: session.sourceTemplateId,
-                                        };
-                                        setSession(editableSession);
-                                        toasts.push('Session loaded for editing. Press Start when ready.', 'success');
-                                      }}>
-                                        <Edit className="h-3 w-3 mr-1" />
-                                        Edit
-                                      </Button>
-                                      <Button variant="destructive" size="sm" onClick={async (e) => {
-                                        e.stopPropagation();
-                                        if (!confirm('Delete this session?')) return;
-                                        try {
-                                          const uid = auth.currentUser?.uid;
-                                          if (!uid) return toasts.push('Sign in to delete', 'info');
-                                          await deleteDoc(doc(db, 'users', uid, 'sessions', session.id));
-                                          // remove from local weekly state
-                                          const days = weekly.days.map(d => ({ ...d, sessionsList: (d.sessionsList || []).filter(s => s.id !== session.id) }));
-                                          const newWeekly = normalizeWeekly({ ...weekly, days } as WeeklyPlan);
-                                          setWeekly(newWeekly);
-                                          // remove from history list
-                                          setItems(prev => prev.filter(x => x.id !== session.id));
-                                        } catch (e) {
-                                          console.error('Delete session failed', e);
-                                          toasts.push('Delete failed - see console', 'error');
-                                        }
-                                      }}>Delete</Button>
+                                      {/* Only real saved sessions carry exercises and a real doc id to reopen/edit. */}
+                                      {session.source === 'firestore' && (
+                                        <>
+                                          <Button variant="outline" size="sm" onClick={(e) => {
+                                            e.stopPropagation();
+                                            // Reopen this saved workout to continue/edit it. sourceSessionId makes the
+                                            // next Save update this same history entry instead of creating a duplicate.
+                                            const editableSession: ResistanceSession = {
+                                              dateISO: session.dateISO || toISO(new Date()),
+                                              sessionName: session.sessionName || 'Workout',
+                                              exercises: session.exercises || [],
+                                              completed: false, // reopen for editing
+                                              sessionTypes: session.sessionTypes || [],
+                                              durationSec: session.durationSec || 0, // preserve original elapsed time
+                                              startedAt: undefined,
+                                              completedAt: undefined,
+                                              sourceTemplateId: session.sourceTemplateId,
+                                              sourceSessionId: session.id,
+                                            };
+                                            setSession(editableSession);
+                                            onOpenWorkoutTab?.();
+                                            toasts.push('Opened for editing. Change it and press Save to update, or Start to resume timing.', 'success');
+                                          }}>
+                                            <Edit className="h-3 w-3 mr-1" />
+                                            Continue / Edit
+                                          </Button>
+                                          <Button variant="destructive" size="sm" onClick={async (e) => {
+                                            e.stopPropagation();
+                                            if (!confirm('Delete this session?')) return;
+                                            try {
+                                              const uid = auth.currentUser?.uid;
+                                              if (!uid) return toasts.push('Sign in to delete', 'info');
+                                              await deleteDoc(doc(db, 'users', uid, 'sessions', session.id));
+                                              // remove from local weekly state
+                                              const days = weekly.days.map(d => ({ ...d, sessionsList: (d.sessionsList || []).filter(s => s.id !== session.id) }));
+                                              const newWeekly = normalizeWeekly({ ...weekly, days } as WeeklyPlan);
+                                              setWeekly(newWeekly);
+                                              // remove from history list
+                                              setItems(prev => prev.filter(x => x.id !== session.id));
+                                            } catch (e) {
+                                              console.error('Delete session failed', e);
+                                              toasts.push('Delete failed - see console', 'error');
+                                            }
+                                          }}>Delete</Button>
+                                        </>
+                                      )}
                                     </div>
                                   </div>
                                 </CardHeader>

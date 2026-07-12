@@ -682,10 +682,16 @@ export function WorkoutView({
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [routineName, setRoutineName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  // Confirmation before finishing/saving, so an accidental tap can't wipe the session.
+  const [showFinishConfirm, setShowFinishConfirm] = useState(false);
   const workoutActive = Boolean(session.startedAt && !session.completed);
   const displayedTimerSec = workoutActive ? getCappedWorkoutDuration(session, timerSec) : timerSec;
   const workoutAutoCutoffReached = hasReachedWorkoutCutoff(session, timerSec);
-  const canFinishWorkout = !session.completed && workoutActive;
+  // Allow saving whenever there is something to save (active timer or any exercises),
+  // which also covers reopened/edited sessions that aren't currently being timed.
+  const canFinishWorkout = !session.completed && (workoutActive || session.exercises.length > 0);
+  // A session that was opened from history (or reopened after finishing) updates in place.
+  const isEditingSaved = Boolean(session.sourceSessionId);
   const canDiscardWorkout = !session.completed && (
     workoutActive ||
     (session.durationSec || 0) > 0 ||
@@ -912,6 +918,7 @@ export function WorkoutView({
   };
 
   const completeWorkout = async () => {
+    if (session.completed) return;
     // Prevent double-processing for the same session object
     if (completedGuards.has(session)) {
       console.warn('[WT] completeWorkout called but session already processed', { sessionName: session.sessionName, dateISO: session.dateISO });
@@ -919,13 +926,17 @@ export function WorkoutView({
     }
     completedGuards.add(session);
     const finalDurationSec = getCappedWorkoutDuration(session, timerSec);
+    const completedAt = session.completedAt || Date.now();
+    const existingId = session.sourceSessionId;
+    // What "Undo" reopens to. Refined below with the saved doc id (if signed in) so a
+    // re-finish updates the same history entry instead of creating a duplicate.
+    let reopenTarget: ResistanceSession = { ...session, completed: false, completedAt: undefined, startedAt: undefined, durationSec: finalDurationSec };
 
     // Mark session as completed in local state
-    setSession({ ...session, completed: true, durationSec: finalDurationSec });
+    setSession({ ...session, completed: true, durationSec: finalDurationSec, completedAt });
 
     const today = session.dateISO;
     const todayIndex = weekly.days.findIndex((d) => d.dateISO === today);
-    const freshSession = defaultSession();
 
     // Persist completed session to Firestore first so we get a document id
     try {
@@ -933,9 +944,15 @@ export function WorkoutView({
       if (!uid) {
         console.warn('[WT] completeWorkout: no user id, cannot persist session');
       } else {
-        const payload = { ...session, completed: true, durationSec: finalDurationSec, completedAt: Date.now() };
-        const docRef = await addDoc(collection(db, 'users', uid, 'sessions'), payload as any);
-        const sessionId = docRef.id;
+        const payload = { ...session, completed: true, durationSec: finalDurationSec, completedAt };
+        let sessionId = existingId;
+        if (existingId) {
+          // Editing/continuing a workout that already lives in history: update it in place.
+          await setDoc(doc(db, 'users', uid, 'sessions', existingId), payload as any, { merge: true });
+        } else {
+          const docRef = await addDoc(collection(db, 'users', uid, 'sessions'), payload as any);
+          sessionId = docRef.id;
+        }
         let nextWeekly = weekly;
 
         if (todayIndex !== -1) {
@@ -945,9 +962,12 @@ export function WorkoutView({
           if (markTypes.includes('Bike') && !markTypes.includes('Cardio')) markTypes.push('Cardio');
           const newTypes = { ...updatedDays[todayIndex].types } as Record<string, boolean>;
           markTypes.forEach((t) => { newTypes[t] = true; });
-          // push a session record (with id) into sessionsList (authoritative list of sessions)
+          // push a session record (with id) into sessionsList (authoritative list of sessions),
+          // but avoid duplicating it when we just updated an existing session in place.
           const oldList = Array.isArray(updatedDays[todayIndex].sessionsList) ? updatedDays[todayIndex].sessionsList.slice() : [];
-          oldList.push({ id: sessionId, sessionTypes: markTypes });
+          if (!oldList.some((s) => s.id === sessionId)) {
+            oldList.push({ id: sessionId, sessionTypes: markTypes });
+          }
           const after = { ...newTypes, sessions: oldList.length };
           updatedDays[todayIndex] = { ...updatedDays[todayIndex], types: newTypes, sessions: after.sessions, sessionsList: oldList };
           const newWeekly = { ...weekly, days: updatedDays } as WeeklyPlan;
@@ -957,9 +977,13 @@ export function WorkoutView({
           console.warn('[WT] completeWorkout: todayIndex not found in weekly.days', { today, weeklyDays: weekly.days.map((d) => d.dateISO) });
         }
 
-        // Persist weekly and the cleared active session together so a reload cannot restore
-        // the just-finished workout as an open session.
-        await setDoc(doc(db, 'users', uid, 'state', nextWeekly.weekOfISO), { weekly: nextWeekly, session: freshSession }, { merge: true });
+        // Keep the finished workout on screen (completed) and remember its id so it can be
+        // reopened and re-saved in place. Persisting it as completed means a reload restores
+        // it in a done state rather than re-opening the timer.
+        const persistedSession = { ...session, completed: true, durationSec: finalDurationSec, completedAt, sourceSessionId: sessionId };
+        reopenTarget = { ...persistedSession, completed: false, completedAt: undefined, startedAt: undefined };
+        setSession(persistedSession);
+        await setDoc(doc(db, 'users', uid, 'state', nextWeekly.weekOfISO), { weekly: nextWeekly, session: persistedSession }, { merge: true });
       }
     } catch (e) {
       console.error('Failed to save completed session', e);
@@ -971,17 +995,27 @@ export function WorkoutView({
     // Play celebration sound after the save path succeeds.
     playWorkoutCompletionSound();
 
-    // stop the timer when completed
+    // stop the timer when completed; the workout stays on screen so it can be reviewed,
+    // reopened, or a new one started manually.
     setTimerSec(0);
+    const undoFinish = () => {
+      completedGuards.delete(session);
+      setTimerSec(reopenTarget.durationSec || 0);
+      setSession(reopenTarget);
+      toasts.push('Workout reopened — keep editing, then Save to update it.', 'info');
+    };
+    toasts.push(
+      existingId ? 'Workout updated and saved to history.' : 'Workout saved to history.',
+      'success',
+      { action: { label: 'Undo', onClick: undoFinish }, duration: 8000 },
+    );
+  };
 
-    // Clear the current workout session to make space for a new one
-    // The completed workout is now saved in history and remains editable there
-    setTimeout(() => {
-      setSession(freshSession);
-      toasts.push('Workout completed. Starting a fresh workout session.', 'success');
-    }, 1500); // Small delay to let user see the completion state
-
-    // leave the guard true to prevent re-entry
+  const reopenWorkout = () => {
+    completedGuards.delete(session);
+    setTimerSec(session.durationSec || 0);
+    setSession({ ...session, completed: false, completedAt: undefined, startedAt: undefined });
+    toasts.push('Workout reopened. Edit and press Save to update it, or Start to resume timing.', 'info');
   };
 
   const loadRoutines = async () => {
@@ -1282,10 +1316,16 @@ export function WorkoutView({
                 </Button>
               ) : null}
               {session.completed ? (
-                <div className="inline-flex items-center rounded-full bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-100">
-                  <Check className="mr-2 h-4 w-4" />
-                  Workout completed
-                </div>
+                <>
+                  <div className="inline-flex items-center rounded-full bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-100">
+                    <Check className="mr-2 h-4 w-4" />
+                    Workout saved
+                  </div>
+                  <Button onClick={reopenWorkout} className="bg-white text-slate-900 hover:bg-slate-100">
+                    <Play className="mr-2 h-4 w-4" />
+                    Reopen &amp; continue
+                  </Button>
+                </>
               ) : null}
             </div>
           </div>
@@ -1461,10 +1501,20 @@ export function WorkoutView({
                 Discard workout
               </Button>
             ) : null}
+            {session.completed ? (
+              <Button
+                variant="outline"
+                onClick={reopenWorkout}
+                className="border-sky-200 bg-white text-sky-700 hover:bg-sky-50"
+              >
+                <Play className="mr-2 h-4 w-4" />
+                Reopen &amp; continue
+              </Button>
+            ) : null}
             {canFinishWorkout ? (
-              <Button onClick={completeWorkout} className="bg-emerald-500 text-white hover:bg-emerald-600">
+              <Button onClick={() => setShowFinishConfirm(true)} className="bg-emerald-500 text-white hover:bg-emerald-600">
                 <Check className="mr-2 h-4 w-4" />
-                Finish & save workout
+                {isEditingSaved ? 'Save changes' : 'Finish & save workout'}
               </Button>
             ) : null}
           </div>
@@ -1474,7 +1524,7 @@ export function WorkoutView({
       {workoutActive && !session.completed ? (
         <div className="fixed bottom-24 right-6 z-40">
           <Button
-            onClick={completeWorkout}
+            onClick={() => setShowFinishConfirm(true)}
             className="h-auto rounded-full bg-emerald-500 px-5 py-3 text-white shadow-xl shadow-emerald-200 hover:bg-emerald-600"
           >
             <Check className="mr-3 h-5 w-5" />
@@ -1528,6 +1578,41 @@ export function WorkoutView({
                 setSelectedRoutineId(null);
                 toasts.push(`Loaded "${found.name}". Press Start when ready.`, 'success');
               }}>Load selected</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Finish confirmation - guards against an accidental tap wiping the session */}
+      {showFinishConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-2">
+              {isEditingSaved ? 'Save changes to this workout?' : 'Finish and save this workout?'}
+            </h3>
+            <p className="text-sm text-slate-600">
+              {isEditingSaved
+                ? 'This updates the saved workout in your history. You can reopen it again anytime.'
+                : 'This saves the workout to your history. It will stay on screen and you can reopen it to keep editing.'}
+            </p>
+            <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <div className="font-medium">{session.sessionName || 'Workout'}</div>
+              <div className="mt-1 text-slate-500">
+                {totalStats.totalExercises} exercise{totalStats.totalExercises === 1 ? '' : 's'} · {totalStats.totalSets} sets logged · {totalStats.totalReps} reps
+                {session.startedAt ? ` · ${formatDuration(displayedTimerSec)}` : ''}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <Button variant="outline" onClick={() => setShowFinishConfirm(false)}>
+                Keep editing
+              </Button>
+              <Button
+                onClick={() => { setShowFinishConfirm(false); void completeWorkout(); }}
+                className="bg-emerald-500 text-white hover:bg-emerald-600"
+              >
+                <Check className="mr-2 h-4 w-4" />
+                {isEditingSaved ? 'Save changes' : 'Finish & save'}
+              </Button>
             </div>
           </div>
         </div>

@@ -86,7 +86,8 @@ export function createEmptyWeek(mondayDate: Date, customTypes: string[] = [], ty
   };
 }
 
-type ToastMessage = { id: string; text: string; kind?: 'info' | 'success' | 'error' };
+type ToastAction = { label: string; onClick: () => void };
+type ToastMessage = { id: string; text: string; kind?: 'info' | 'success' | 'error'; action?: ToastAction; duration?: number };
 
 const toastStore = {
   messages: [] as ToastMessage[],
@@ -112,8 +113,12 @@ function getToastSnapshot() {
 export function useToasts() {
   const messages = useSyncExternalStore(subscribeToToasts, getToastSnapshot, getToastSnapshot);
 
-  const push = (text: string, kind?: 'info' | 'success' | 'error') => {
-    toastStore.messages = [...toastStore.messages, { id: crypto.randomUUID(), text, kind }];
+  const push = (
+    text: string,
+    kind?: 'info' | 'success' | 'error',
+    opts?: { action?: ToastAction; duration?: number },
+  ) => {
+    toastStore.messages = [...toastStore.messages, { id: crypto.randomUUID(), text, kind, action: opts?.action, duration: opts?.duration }];
     emitToastChange();
   };
 
@@ -191,10 +196,7 @@ export function defaultSession(): ResistanceSession {
   return {
     dateISO: toISO(new Date()),
     sessionName: "Workout",
-    exercises: [
-      { id: crypto.randomUUID(), name: "Pull-ups", minSets: 3, targetReps: 6, intensity: "", sets: [0, 0, 0], notes: "" },
-      { id: crypto.randomUUID(), name: "Push-ups", minSets: 3, targetReps: 12, intensity: "", sets: [0, 0, 0], notes: "" },
-    ],
+    exercises: [],
     completed: false,
     sessionTypes: ["Resistance"],
     durationSec: 0,

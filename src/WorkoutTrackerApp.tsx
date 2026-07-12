@@ -1020,7 +1020,7 @@ export default function WorkoutTrackerApp() {
           </TabsContent>
 
           <TabsContent value="history" className="mt-4">
-            <HistoryView weekly={weekly} setWeekly={setWeekly} setSession={setSession} previousWeeks={previousWeeks} />
+            <HistoryView weekly={weekly} setWeekly={setWeekly} setSession={setSession} previousWeeks={previousWeeks} onOpenWorkoutTab={() => setActiveTab('workout')} />
           </TabsContent>
 
           <TabsContent value="library" className="mt-4">

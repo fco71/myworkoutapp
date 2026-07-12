@@ -60,6 +60,9 @@ export type ResistanceSession = {
   completedAt?: number;
   ts?: number;
   sourceTemplateId?: string;
+  // Firestore doc id of the saved session this draft came from (History "Continue" or
+  // a reopened finish). When set, finishing updates that document instead of creating a new one.
+  sourceSessionId?: string;
 };
 
 export type WeeklyDay = {

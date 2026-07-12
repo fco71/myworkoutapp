@@ -4,7 +4,7 @@ import { doc, setDoc, collection, addDoc, getDocs, deleteDoc, getDoc, collection
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, Check, Edit, Search, Dumbbell, User, Grid3X3, Target, Bookmark, MessageSquare, ChevronDown } from "lucide-react";
+import { Plus, Trash2, Check, Edit, Copy, Search, Dumbbell, User, Grid3X3, Target, Bookmark, MessageSquare, ChevronDown } from "lucide-react";
 import { ResistanceExercise, ResistanceSession } from "@/types";
 import {
   cn,
@@ -62,6 +62,28 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
     setComposerKind('routine');
     setComposerPublic(!!routine.public);
     setComposerFavorite(!!routine.favorite);
+  };
+
+  // Load any routine (owned or public) into the composer as an unsaved copy,
+  // so it can be tweaked and saved as a brand-new routine.
+  const duplicateRoutine = (routine: any) => {
+    setComposerName(`${routine.name} (copy)`);
+    setComposerExercises((routine.exercises || []).map((e: any) => ({
+      id: crypto.randomUUID(),
+      name: e.name,
+      minSets: e.minSets ?? 3,
+      targetReps: e.targetReps ?? 8,
+      intensity: "",
+      sets: Array(e.minSets ?? 3).fill(0),
+      notes: e.notes || "",
+    })));
+    setEditingId(null);
+    setComposerKind('routine');
+    setComposerPublic(false);
+    setComposerFavorite(false);
+    setSaveMessage('Duplicated into the builder — edit and press Save to store it as a new routine.');
+    setTimeout(() => setSaveMessage(null), 4000);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const saveComposerAsRoutine = async () => {
@@ -768,6 +790,19 @@ export function LibraryView({ userName, onLoadRoutine }: { userName: string | nu
                 )}
 
                 <div className="flex flex-wrap gap-1 xl:justify-end">
+                  {/* Duplicate button - any routine (including public) can be copied into the builder */}
+                  {it.kind === 'routine' && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => duplicateRoutine(it)}
+                      title="Duplicate into the builder as a starting point"
+                      className="text-gray-600 hover:text-blue-600 hover:bg-blue-50"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  )}
+
                   {/* Edit button - only show for routines owned by current user */}
                   {auth.currentUser?.uid && it.owner === auth.currentUser.uid && it.kind === 'routine' && (
                     <Button
