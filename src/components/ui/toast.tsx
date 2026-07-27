@@ -1,19 +1,47 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 type ToastAction = { label: string; onClick: () => void };
 type ToastMessage = { id: string; text: string; kind?: 'info' | 'success' | 'error'; action?: ToastAction; duration?: number };
 
 export function ToastContainer({ messages, onDismiss }: { messages: ToastMessage[]; onDismiss: (id: string) => void }) {
+  // Keep the latest onDismiss without making it an effect dependency — otherwise every
+  // parent re-render (e.g. the once-a-second workout timer) would tear down and recreate
+  // the dismiss timers, so toasts would never actually auto-dismiss.
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+  const timersRef = useRef<Map<string, number>>(new Map());
+
   useEffect(() => {
-    const timers: number[] = [];
+    const timers = timersRef.current;
+    // Schedule a one-shot dismiss for each new message; leave existing timers running.
     messages.forEach((m) => {
+      if (timers.has(m.id)) return;
       // Actionable toasts (e.g. Undo) linger longer so there's time to act.
       const ms = m.duration ?? (m.action ? 8000 : 3500);
-      const t = window.setTimeout(() => onDismiss(m.id), ms);
-      timers.push(t);
+      const t = window.setTimeout(() => {
+        timers.delete(m.id);
+        onDismissRef.current(m.id);
+      }, ms);
+      timers.set(m.id, t);
     });
-    return () => timers.forEach((t) => clearTimeout(t));
-  }, [messages, onDismiss]);
+    // Drop timers for messages that are already gone.
+    const liveIds = new Set(messages.map((m) => m.id));
+    timers.forEach((t, id) => {
+      if (!liveIds.has(id)) {
+        clearTimeout(t);
+        timers.delete(id);
+      }
+    });
+  }, [messages]);
+
+  // Clear everything on unmount.
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach((t) => clearTimeout(t));
+      timers.clear();
+    };
+  }, []);
 
   return (
     <div style={{ position: 'fixed', right: 16, top: 16, zIndex: 9999 }}>

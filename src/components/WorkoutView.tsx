@@ -867,54 +867,54 @@ export function WorkoutView({
   };
 
   const addExercise = () => {
-    setSession({
-      ...session,
+    setSession((current) => ({
+      ...current,
       exercises: [
-        ...session.exercises,
+        ...current.exercises,
         { id: crypto.randomUUID(), name: "", minSets: 3, targetReps: 6, intensity: "", sets: [0, 0, 0], notes: "" },
       ],
-    });
+    }));
   };
 
   const deleteExercise = (id: string) => {
-    setSession({ ...session, exercises: session.exercises.filter((e) => e.id !== id) });
+    setSession((current) => ({ ...current, exercises: current.exercises.filter((e) => e.id !== id) }));
   };
 
   const updateExercise = (id: string, patch: Partial<ResistanceExercise>) => {
-    setSession({
-      ...session,
-      exercises: session.exercises.map((e) => (e.id === id ? { ...e, ...patch } : e)),
-    });
+    setSession((current) => ({
+      ...current,
+      exercises: current.exercises.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+    }));
   };
 
   const updateSet = (id: string, setIndex: number, value: number) => {
-    setSession({
-      ...session,
-      exercises: session.exercises.map((e) => {
+    setSession((current) => ({
+      ...current,
+      exercises: current.exercises.map((e) => {
         if (e.id !== id) return e;
         const sets = [...e.sets];
         sets[setIndex] = value;
         return { ...e, sets };
       }),
-    });
+    }));
   };
 
   const addSet = (id: string) => {
-    setSession({
-      ...session,
-      exercises: session.exercises.map((e) => (e.id === id ? { ...e, sets: [...e.sets, 0] } : e)),
-    });
+    setSession((current) => ({
+      ...current,
+      exercises: current.exercises.map((e) => (e.id === id ? { ...e, sets: [...e.sets, 0] } : e)),
+    }));
   };
 
   const removeSet = (id: string, setIndex: number) => {
-    setSession({
-      ...session,
-      exercises: session.exercises.map((e) => {
+    setSession((current) => ({
+      ...current,
+      exercises: current.exercises.map((e) => {
         if (e.id !== id) return e;
         const sets = e.sets.filter((_, i) => i !== setIndex);
         return { ...e, sets };
       }),
-    });
+    }));
   };
 
   const completeWorkout = async () => {
