@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
-import { collection, doc, getDoc, getDocs, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, query, setDoc, where } from "firebase/firestore";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -201,6 +201,86 @@ function alignWeeklyToCurrentWeek(incomingWeekly: WeeklyPlan, currentMonday: Dat
   return normalized;
 }
 
+function hasWeeklyActivity(weekly: WeeklyPlan) {
+  return weekly.days.some((day) => (
+    Object.values(day.types || {}).some(Boolean) ||
+    (Array.isArray(day.sessionsList) && day.sessionsList.length > 0) ||
+    (day.sessions || 0) > 0
+  ));
+}
+
+function dateFromFirestoreValue(value: any) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value === 'number') return new Date(value);
+  if (typeof value.toDate === 'function') return value.toDate();
+  return null;
+}
+
+function getSessionDateISO(session: any) {
+  if (isISODate(session?.dateISO)) return session.dateISO;
+  const completedAt = dateFromFirestoreValue(session?.completedAt || session?.ts);
+  return completedAt ? toISO(completedAt) : null;
+}
+
+async function loadCurrentWeekSessions(userId: string, currentWeekDates: string[]) {
+  const sessionsQuery = query(
+    collection(db, 'users', userId, 'sessions'),
+    where('dateISO', 'in', currentWeekDates),
+  );
+  const snapshot = await getDocsFromServer(sessionsQuery);
+  return snapshot.docs.map((sessionDoc) => ({ id: sessionDoc.id, ...sessionDoc.data() }));
+}
+
+function mergeWeeklyWithSessions(weekly: WeeklyPlan, sessions: any[], currentWeekDates: string[]) {
+  if (sessions.length === 0) return weekly;
+
+  const dateToIndex = new Map(currentWeekDates.map((dateISO, index) => [dateISO, index]));
+  const days = weekly.days.map((day) => ({
+    ...day,
+    types: { ...(day.types || {}) },
+    sessionsList: Array.isArray(day.sessionsList) ? [...day.sessionsList] : [],
+    comments: { ...(day.comments || {}) },
+  }));
+  const customTypes = ensureUniqueTypes(weekly.customTypes || []);
+  const benchmarks = { ...(weekly.benchmarks || {}) };
+
+  sessions.forEach((session) => {
+    const dateISO = getSessionDateISO(session);
+    const dayIndex = dateISO ? dateToIndex.get(dateISO) : undefined;
+    if (dayIndex === undefined) return;
+
+    const sessionTypes = ensureUniqueTypes(Array.isArray(session.sessionTypes) ? session.sessionTypes : []);
+    if (sessionTypes.length === 0) return;
+
+    sessionTypes.forEach((type) => {
+      if (!customTypes.includes(type)) customTypes.push(type);
+      if (!(type in benchmarks)) benchmarks[type] = 0;
+    });
+
+    const markTypes = sessionTypes.includes('Bike') && !sessionTypes.includes('Cardio')
+      ? [...sessionTypes, 'Cardio']
+      : sessionTypes;
+
+    markTypes.forEach((type) => {
+      days[dayIndex].types[type] = true;
+    });
+
+    const sessionId = session.id ? String(session.id) : '';
+    if (sessionId && !days[dayIndex].sessionsList.some((entry) => entry?.id === sessionId)) {
+      days[dayIndex].sessionsList.push({ id: sessionId, sessionTypes: markTypes });
+    }
+    days[dayIndex].sessions = days[dayIndex].sessionsList.length || 1;
+  });
+
+  return normalizeWeekly({
+    ...weekly,
+    days,
+    customTypes,
+    benchmarks,
+  } as WeeklyPlan);
+}
+
 async function loadPreviousWeeksBatch(
   userId: string,
   weekIsos: string[],
@@ -211,7 +291,7 @@ async function loadPreviousWeeksBatch(
   if (weekIsos.length === 0) return [] as WeeklyPlan[];
 
   const snaps = await Promise.all(
-    weekIsos.map((weekOfISO) => getDoc(doc(db, 'users', userId, 'state', weekOfISO)))
+    weekIsos.map((weekOfISO) => getDocFromServer(doc(db, 'users', userId, 'state', weekOfISO)))
   );
 
   return weekIsos.map((weekOfISO, index) => {
@@ -259,6 +339,7 @@ export default function WorkoutTrackerApp() {
     userId: string | null;
     historyStartMondayISO: string | null;
   }>({ userId: null, historyStartMondayISO: null });
+  const weeklyLoadReadyRef = useRef(false);
   historyLoadContextRef.current = { userId, historyStartMondayISO };
 
   // Request notification permissions on app initialization
@@ -321,7 +402,9 @@ export default function WorkoutTrackerApp() {
     const unsub = onAuthStateChanged(auth, async (u) => {
       try {
         if (u) {
+          weeklyLoadReadyRef.current = false;
           setUserId(u.uid);
+          setInitialized(false);
           setPreviousWeeks([]);
           setHistoryStartMondayISO(null);
           setHistoryWeekIsos([]);
@@ -393,22 +476,54 @@ export default function WorkoutTrackerApp() {
 
           const currentMonday = getMonday();
           const currentWeekISO = toISO(currentMonday);
+          const currentWeekDates = weekDates(currentMonday).map((date) => toISO(date));
           let initialPreviousWeeks: WeeklyPlan[] = [];
           let currentWeeklySnapshot: WeeklyPlan | null = null;
           let loadedSettingsTypes: string[] = [];
           let loadedTypeCategories: Record<string, string> = {};
+          let weeklyStateLoadFailed = false;
+          let currentWeekSessions: any[] | null = null;
+
+          const getCurrentWeekSessions = async () => {
+            if (currentWeekSessions === null) {
+              currentWeekSessions = await loadCurrentWeekSessions(u.uid, currentWeekDates);
+            }
+            return currentWeekSessions;
+          };
+
+          const restoreFromSessions = async (candidateWeekly: WeeklyPlan, reason: string) => {
+            try {
+              const sessions = await getCurrentWeekSessions();
+              const restored = mergeWeeklyWithSessions(candidateWeekly, sessions, currentWeekDates);
+              if (sessions.length > 0 && !hasWeeklyActivity(candidateWeekly) && hasWeeklyActivity(restored)) {
+                console.info('[WT] Restored current week from session documents', {
+                  reason,
+                  currentWeekISO,
+                  sessionCount: sessions.length,
+                });
+              }
+              return restored;
+            } catch (e) {
+              console.warn('[WT] Failed to load current week sessions for recovery', {
+                reason,
+                currentWeekISO,
+                error: e,
+              });
+              return candidateWeekly;
+            }
+          };
 
           try {
             const weekRef = doc(db, 'users', u.uid, 'state', currentWeekISO);
-            const wSnap = await getDoc(weekRef);
+            const wSnap = await getDocFromServer(weekRef);
 
             if (wSnap.exists()) {
               const data = wSnap.data() as PersistedState;
               if (data?.weekly) {
-                const normalized = {
+                const normalized = await restoreFromSessions({
                   ...alignWeeklyToCurrentWeek(data.weekly, currentMonday, currentWeekISO),
                   weekNumber: historyPlan.currentWeekNumber,
-                };
+                }, 'current-week-state');
                 currentWeeklySnapshot = normalized;
                 setWeekly(normalized);
               }
@@ -421,7 +536,7 @@ export default function WorkoutTrackerApp() {
               if (previousWeekISO) {
                 try {
                   const prevWeekRef = doc(db, 'users', u.uid, 'state', previousWeekISO);
-                  const prevSnap = await getDoc(prevWeekRef);
+                  const prevSnap = await getDocFromServer(prevWeekRef);
                   if (prevSnap.exists()) {
                     const prevData = prevSnap.data() as PersistedState;
                     if (prevData?.weekly) {
@@ -438,12 +553,12 @@ export default function WorkoutTrackerApp() {
               }
 
               const ref = doc(db, "users", u.uid, "state", "tracker");
-              const snap = await getDoc(ref);
+              const snap = await getDocFromServer(ref);
 
               if (snap.exists()) {
                 const data = snap.data() as PersistedState;
                 if (data?.weekly) {
-                  const normalized = {
+                  const normalized = await restoreFromSessions({
                     ...alignWeeklyToCurrentWeek({
                       ...data.weekly,
                       benchmarks: Object.keys(benchmarksFromPrevWeek).length > 0 ? benchmarksFromPrevWeek : data.weekly.benchmarks,
@@ -453,7 +568,7 @@ export default function WorkoutTrackerApp() {
                       weekOfISO: currentWeekISO,
                     } as WeeklyPlan, currentMonday, currentWeekISO),
                     weekNumber: historyPlan.currentWeekNumber,
-                  };
+                  }, 'tracker-fallback');
 
                   currentWeeklySnapshot = normalized;
                   setWeekly(normalized);
@@ -466,11 +581,11 @@ export default function WorkoutTrackerApp() {
                   defaultWk.customTypes = customTypesFromPrevWeek;
                 }
 
-                const normalizedDefault = normalizeWeekly({
+                const normalizedDefault = await restoreFromSessions(normalizeWeekly({
                   ...defaultWk,
                   weekOfISO: currentWeekISO,
                   weekNumber: historyPlan.currentWeekNumber,
-                } as WeeklyPlan);
+                } as WeeklyPlan), 'default-current-week');
 
                 currentWeeklySnapshot = normalizedDefault;
                 setWeekly(normalizedDefault);
@@ -490,6 +605,7 @@ export default function WorkoutTrackerApp() {
               }
             }
           } catch (e) {
+            weeklyStateLoadFailed = true;
             console.warn('Failed to load per-week state, falling back to tracker', e);
           }
 
@@ -525,11 +641,16 @@ export default function WorkoutTrackerApp() {
           }
 
           if (!currentWeeklySnapshot) {
-            const fallbackWeekly = normalizeWeekly({
+            if (weeklyStateLoadFailed) {
+              appToasts.push('Could not load weekly data from Firestore. Not saving defaults over it.', 'error', { duration: 10000 });
+              return;
+            }
+
+            const fallbackWeekly = await restoreFromSessions(normalizeWeekly({
               ...defaultWeekly(),
               weekOfISO: currentWeekISO,
               weekNumber: historyPlan.currentWeekNumber,
-            } as WeeklyPlan);
+            } as WeeklyPlan), 'final-fallback');
             currentWeeklySnapshot = fallbackWeekly;
             setWeekly(fallbackWeekly);
           }
@@ -555,8 +676,10 @@ export default function WorkoutTrackerApp() {
           }
 
           setPreviousWeeks(initialPreviousWeeks);
+          weeklyLoadReadyRef.current = true;
           setInitialized(true);
         } else {
+          weeklyLoadReadyRef.current = false;
           setUserId(null);
           setUserName(null);
           setPreviousWeeks([]);
@@ -713,7 +836,7 @@ export default function WorkoutTrackerApp() {
   // autosave to Firestore
   useEffect(() => {
     // don't autosave until we've loaded the initial state from Firestore
-    if (!userId || !initialized) return;
+    if (!userId || !initialized || !weeklyLoadReadyRef.current) return;
     // autosave to per-week document keyed by weekly.weekOfISO
     try {
       const ref = doc(db, "users", userId, "state", weekly.weekOfISO);
