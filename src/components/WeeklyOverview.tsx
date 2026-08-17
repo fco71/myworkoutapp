@@ -1,9 +1,8 @@
-import { useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { WeeklyPlan } from "@/types";
 import { toISO } from "@/lib/workout-utils";
 
-export function WeeklyOverview({ weekly, previousWeeks = [] }: { weekly: WeeklyPlan; previousWeeks?: WeeklyPlan[] }) {
+export function WeeklyOverview({ weekly }: { weekly: WeeklyPlan; previousWeeks?: WeeklyPlan[] }) {
   // normalize today's ISO (yyyy-mm-dd) using local date
   const today = toISO(new Date());
 
@@ -43,23 +42,6 @@ export function WeeklyOverview({ weekly, previousWeeks = [] }: { weekly: WeeklyP
   const hasResistanceCategory = Object.values(typeCats).some((v) => v === 'Resistance');
   const hasCardioCategory = Object.values(typeCats).some((v) => v === 'Cardio');
   const hasMindfulnessCategory = Object.values(typeCats).some((v) => v === 'Mindfulness');
-
-  // Streak: consecutive weeks (ending at most recent active week) with at least one workout
-  const streak = useMemo(() => {
-    const weekActivity = (w: WeeklyPlan) =>
-      w.days.reduce((acc, d) => acc + Object.keys(d.types || {}).filter(k => d.types[k]).length, 0);
-    const allWeeks = [weekly, ...previousWeeks].sort(
-      (a, b) => new Date(b.weekOfISO).getTime() - new Date(a.weekOfISO).getTime()
-    );
-    // If current week has no activity yet, start counting from last week
-    const startIdx = weekActivity(allWeeks[0]) === 0 ? 1 : 0;
-    let count = 0;
-    for (let i = startIdx; i < allWeeks.length; i++) {
-      if (weekActivity(allWeeks[i]) > 0) count++;
-      else break;
-    }
-    return count;
-  }, [weekly, previousWeeks]);
 
   return (
     <div className="space-y-4 mb-8">
@@ -102,24 +84,6 @@ export function WeeklyOverview({ weekly, previousWeeks = [] }: { weekly: WeeklyP
           </div>
         </CardContent>
       </Card>
-
-  {/* Streak */}
-      {streak > 0 && (
-        <Card className="bg-gradient-to-br from-amber-500 to-amber-600 text-white border-0 shadow-lg">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-amber-100 text-sm font-medium">Streak</p>
-                <p className="text-3xl font-bold">{streak}</p>
-                <p className="text-amber-200 text-xs">{streak === 1 ? 'week' : 'weeks'}</p>
-              </div>
-              <div className="w-12 h-12 bg-amber-400 rounded-full flex items-center justify-center">
-                <span className="text-2xl">🔥</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
   {/* Resistance Progress */}
       {hasResistanceCategory && (
