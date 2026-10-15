@@ -1,12 +1,12 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
-import { collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, query, setDoc, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocFromCache, getDocFromServer, getDocs, getDocsFromServer, query, setDoc, where } from "firebase/firestore";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { User, ChevronDown, Settings, LogOut, TimerReset } from "lucide-react";
+import { User, ChevronDown, Settings, LogOut, TimerReset, Loader2, TrendingUp } from "lucide-react";
 import { ToastContainer } from "@/components/ui/toast";
 import { WeeklyPlan, ResistanceSession, PersistedState } from "@/types";
 import {
@@ -29,7 +29,9 @@ import { WeeklyBenchmarkStack } from "@/components/WeeklyBenchmarkStack";
 import { WeeklyTracker } from "@/components/WeeklyTracker";
 import { WorkoutView } from "@/components/WorkoutView";
 import { HistoryView } from "@/components/HistoryView";
-import { LibraryView } from "@/components/LibraryView";
+// Rarely-used screens load on demand so they don't slow the first paint.
+const LibraryView = lazy(() => import("@/components/LibraryView").then((m) => ({ default: m.LibraryView })));
+const TrendsView = lazy(() => import("@/components/TrendsView"));
 import { getRemainingSeconds } from "@/logic/timer";
 
 // Expose Firebase objects globally for console access
@@ -132,6 +134,56 @@ async function findEarliestStoredWeek(userId: string) {
     .sort();
 
   return datedWeeks[0] || null;
+}
+
+async function loadProgramStartDate(userId: string) {
+  let loadedProgramStartDate = getDefaultProgramStartDate();
+  try {
+    const programRef = doc(db, 'users', userId, 'settings', 'program');
+    const pSnap = await getDoc(programRef);
+    if (pSnap.exists()) {
+      const data = pSnap.data() as any;
+      if (isISODate(data?.programStartDate)) {
+        loadedProgramStartDate = data.programStartDate;
+        const wasExplicitlyReset = typeof data?.updatedAt === 'number';
+        if (!wasExplicitlyReset && data.programStartDate === getDefaultProgramStartDate()) {
+          const earliestStoredWeek = await findEarliestStoredWeek(userId);
+          if (earliestStoredWeek && earliestStoredWeek < data.programStartDate) {
+            loadedProgramStartDate = earliestStoredWeek;
+            await setDoc(programRef, {
+              programStartDate: earliestStoredWeek,
+              inferredFromHistory: true,
+            }, { merge: true });
+          }
+        }
+        return loadedProgramStartDate;
+      }
+    }
+    const earliestStoredWeek = await findEarliestStoredWeek(userId);
+    loadedProgramStartDate = earliestStoredWeek || loadedProgramStartDate;
+    await setDoc(programRef, {
+      programStartDate: loadedProgramStartDate,
+      inferredFromHistory: !!earliestStoredWeek,
+    }, { merge: true });
+  } catch (e) {
+    console.warn('[WT] Failed to load program settings first', e);
+  }
+  return loadedProgramStartDate;
+}
+
+async function loadProfileName(user: { uid: string; displayName: string | null; email: string | null }) {
+  const fallback = user.displayName || user.email?.split('@')[0] || 'User';
+  try {
+    const profileRef = doc(db, 'users', user.uid, 'profile', 'info');
+    const profileSnap = await getDoc(profileRef);
+    if (profileSnap.exists() && profileSnap.data().username) {
+      return profileSnap.data().username as string;
+    }
+    await setDoc(profileRef, { username: fallback, email: user.email }, { merge: true });
+  } catch (e) {
+    console.warn('Failed to load username, using fallback:', e);
+  }
+  return fallback;
 }
 
 function buildHistoryPlan(programStartDate: string) {
@@ -328,8 +380,12 @@ export default function WorkoutTrackerApp() {
   const [tempUsername, setTempUsername] = useState('');
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  // Where the weekly data on screen came from; 'default' means nothing real has loaded yet.
+  const [authResolved, setAuthResolved] = useState(false);
+  const [weekSource, setWeekSource] = useState<'default' | 'cache' | 'server'>('default');
   const [showSignIn, setShowSignIn] = useState(false);
   const [activeTab, setActiveTab] = useState("week");
+  const [showTrends, setShowTrends] = useState(() => window.location.hash === '#trends');
   const [historyStartMondayISO, setHistoryStartMondayISO] = useState<string | null>(null);
   const [historyWeekIsos, setHistoryWeekIsos] = useState<string[]>([]);
   const [historyRequestedCount, setHistoryRequestedCount] = useState(INITIAL_HISTORY_PRIORITY_COUNT);
@@ -341,6 +397,23 @@ export default function WorkoutTrackerApp() {
   }>({ userId: null, historyStartMondayISO: null });
   const weeklyLoadReadyRef = useRef(false);
   historyLoadContextRef.current = { userId, historyStartMondayISO };
+
+  useEffect(() => {
+    const syncFromHash = () => setShowTrends(window.location.hash === '#trends');
+    window.addEventListener('hashchange', syncFromHash);
+    return () => window.removeEventListener('hashchange', syncFromHash);
+  }, []);
+
+  const openTrends = () => {
+    window.location.hash = 'trends';
+    window.scrollTo({ top: 0 });
+  };
+  const closeTrends = () => {
+    if (window.location.hash === '#trends') {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+    setShowTrends(false);
+  };
 
   // Request notification permissions on app initialization
   useEffect(() => {
@@ -400,8 +473,10 @@ export default function WorkoutTrackerApp() {
   // Auth + initial load
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
+      setAuthResolved(true);
       try {
         if (u) {
+          setWeekSource('default');
           weeklyLoadReadyRef.current = false;
           setUserId(u.uid);
           setInitialized(false);
@@ -411,89 +486,57 @@ export default function WorkoutTrackerApp() {
           setHistoryRequestedCount(0);
           setHistoryLoading(false);
 
-          try {
-            const profileRef = doc(db, 'users', u.uid, 'profile', 'info');
-            const profileSnap = await getDoc(profileRef);
-            if (profileSnap.exists() && profileSnap.data().username) {
-              setUserName(profileSnap.data().username);
-            } else {
-              const defaultUsername = u.displayName || u.email?.split('@')[0] || 'User';
-              setUserName(defaultUsername);
-              await setDoc(profileRef, { username: defaultUsername, email: u.email }, { merge: true });
-            }
-          } catch (e) {
-            console.warn('Failed to load username, using fallback:', e);
-            setUserName(u.displayName || u.email?.split('@')[0] || 'User');
-          }
+          // Profile name is cosmetic; never block the weekly data on it.
+          void loadProfileName(u).then((name) => {
+            if (auth.currentUser?.uid === u.uid) setUserName(name);
+          });
 
-          let loadedProgramStartDate = getDefaultProgramStartDate();
-          try {
-            const programRef = doc(db, 'users', u.uid, 'settings', 'program');
-            const pSnap = await getDoc(programRef);
-            if (pSnap.exists()) {
-              const data = pSnap.data() as any;
-              if (isISODate(data?.programStartDate)) {
-                loadedProgramStartDate = data.programStartDate;
-                const wasExplicitlyReset = typeof data?.updatedAt === 'number';
-                if (!wasExplicitlyReset && data.programStartDate === getDefaultProgramStartDate()) {
-                  const earliestStoredWeek = await findEarliestStoredWeek(u.uid);
-                  if (earliestStoredWeek && earliestStoredWeek < data.programStartDate) {
-                    loadedProgramStartDate = earliestStoredWeek;
-                    await setDoc(programRef, {
-                      programStartDate: earliestStoredWeek,
-                      inferredFromHistory: true,
-                    }, { merge: true });
-                  }
-                }
-                setProgramStartDate(loadedProgramStartDate);
-              } else {
-                const earliestStoredWeek = await findEarliestStoredWeek(u.uid);
-                loadedProgramStartDate = earliestStoredWeek || loadedProgramStartDate;
-                setProgramStartDate(loadedProgramStartDate);
-                await setDoc(programRef, {
-                  programStartDate: loadedProgramStartDate,
-                  inferredFromHistory: !!earliestStoredWeek,
-                }, { merge: true });
-              }
-            } else {
-              const earliestStoredWeek = await findEarliestStoredWeek(u.uid);
-              loadedProgramStartDate = earliestStoredWeek || loadedProgramStartDate;
-              setProgramStartDate(loadedProgramStartDate);
-              await setDoc(programRef, {
-                programStartDate: loadedProgramStartDate,
-                inferredFromHistory: !!earliestStoredWeek,
-              }, { merge: true });
-            }
-          } catch (e) {
-            console.warn('[WT] Failed to load program settings first', e);
-            setProgramStartDate(loadedProgramStartDate);
-          }
+          const currentMonday = getMonday();
+          const currentWeekISO = toISO(currentMonday);
+          const currentWeekDates = weekDates(currentMonday).map((date) => toISO(date));
+          const weekRef = doc(db, 'users', u.uid, 'state', currentWeekISO);
+          let serverWeekApplied = false;
+
+          // Kick off every independent read at once instead of one round-trip after another.
+          const programStartPromise = loadProgramStartDate(u.uid);
+          const weekSnapPromise = getDocFromServer(weekRef);
+          const sessionsPromise = loadCurrentWeekSessions(u.uid, currentWeekDates);
+          const typeSettingsPromise = getDoc(doc(db, 'users', u.uid, 'settings', 'types'));
+          // Rejections are handled where each promise is awaited; silence "unhandled" noise meanwhile.
+          weekSnapPromise.catch(() => {});
+          sessionsPromise.catch(() => {});
+          typeSettingsPromise.catch(() => {});
+
+          // Paint last-known data from the offline cache right away; the server copy replaces it.
+          // Autosave stays off until `initialized`, so this preview can never be written back.
+          getDocFromCache(weekRef).then((cachedSnap) => {
+            if (serverWeekApplied || auth.currentUser?.uid !== u.uid || !cachedSnap.exists()) return;
+            const data = cachedSnap.data() as PersistedState;
+            if (!data?.weekly) return;
+            setWeekly({
+              ...alignWeeklyToCurrentWeek(data.weekly, currentMonday, currentWeekISO),
+              weekNumber: data.weekly.weekNumber || 1,
+            });
+            setWeekSource((prev) => (prev === 'server' ? prev : 'cache'));
+          }).catch(() => {
+            // Not cached yet (first visit on this device) - wait for the server.
+          });
+
+          const loadedProgramStartDate = await programStartPromise;
+          setProgramStartDate(loadedProgramStartDate);
 
           const historyPlan = buildHistoryPlan(loadedProgramStartDate);
           setHistoryStartMondayISO(historyPlan.startMondayISO);
           setHistoryWeekIsos(historyPlan.previousWeekIsos);
           setHistoryRequestedCount(Math.min(INITIAL_HISTORY_PRIORITY_COUNT, historyPlan.previousWeekIsos.length));
 
-          const currentMonday = getMonday();
-          const currentWeekISO = toISO(currentMonday);
-          const currentWeekDates = weekDates(currentMonday).map((date) => toISO(date));
           let initialPreviousWeeks: WeeklyPlan[] = [];
           let currentWeeklySnapshot: WeeklyPlan | null = null;
-          let loadedSettingsTypes: string[] = [];
-          let loadedTypeCategories: Record<string, string> = {};
           let weeklyStateLoadFailed = false;
-          let currentWeekSessions: any[] | null = null;
-
-          const getCurrentWeekSessions = async () => {
-            if (currentWeekSessions === null) {
-              currentWeekSessions = await loadCurrentWeekSessions(u.uid, currentWeekDates);
-            }
-            return currentWeekSessions;
-          };
 
           const restoreFromSessions = async (candidateWeekly: WeeklyPlan, reason: string) => {
             try {
-              const sessions = await getCurrentWeekSessions();
+              const sessions = await sessionsPromise;
               const restored = mergeWeeklyWithSessions(candidateWeekly, sessions, currentWeekDates);
               if (sessions.length > 0 && !hasWeeklyActivity(candidateWeekly) && hasWeeklyActivity(restored)) {
                 console.info('[WT] Restored current week from session documents', {
@@ -514,8 +557,8 @@ export default function WorkoutTrackerApp() {
           };
 
           try {
-            const weekRef = doc(db, 'users', u.uid, 'state', currentWeekISO);
-            const wSnap = await getDocFromServer(weekRef);
+            const wSnap = await weekSnapPromise;
+            serverWeekApplied = true;
 
             if (wSnap.exists()) {
               const data = wSnap.data() as PersistedState;
@@ -606,20 +649,18 @@ export default function WorkoutTrackerApp() {
             }
           } catch (e) {
             weeklyStateLoadFailed = true;
+            serverWeekApplied = true;
             console.warn('Failed to load per-week state, falling back to tracker', e);
           }
 
           try {
-            const settingsRef = doc(db, 'users', u.uid, 'settings', 'types');
-            const sSnap = await getDoc(settingsRef);
+            const sSnap = await typeSettingsPromise;
             if (sSnap.exists()) {
               const data = sSnap.data() as any;
               const t = data?.types;
               const cats = data?.categories || data?.typeCategories || {};
               if (Array.isArray(t) && t.length > 0) {
                 const custom = ensureUniqueTypes(t);
-                loadedSettingsTypes = custom;
-                loadedTypeCategories = cats || {};
                 setWeekly((prev) => {
                   if (prev.customTypes && prev.customTypes.length > 0) return prev;
                   return normalizeWeekly({
@@ -629,7 +670,6 @@ export default function WorkoutTrackerApp() {
                   } as WeeklyPlan);
                 });
               } else if (cats && Object.keys(cats).length > 0) {
-                loadedTypeCategories = cats;
                 setWeekly((prev) => normalizeWeekly({
                   ...prev,
                   typeCategories: { ...(prev.typeCategories || {}), ...(cats || {}) },
@@ -643,6 +683,7 @@ export default function WorkoutTrackerApp() {
           if (!currentWeeklySnapshot) {
             if (weeklyStateLoadFailed) {
               appToasts.push('Could not load weekly data from Firestore. Not saving defaults over it.', 'error', { duration: 10000 });
+              setWeekSource((prev) => (prev === 'cache' ? prev : 'server'));
               return;
             }
 
@@ -655,27 +696,8 @@ export default function WorkoutTrackerApp() {
             setWeekly(fallbackWeekly);
           }
 
-          if (initialPreviousWeeks.length === 0 && historyPlan.previousWeekIsos.length > 0) {
-            try {
-              const fallbackCustomTypes = currentWeeklySnapshot.customTypes.length > 0
-                ? currentWeeklySnapshot.customTypes
-                : loadedSettingsTypes;
-              const fallbackTypeCategories = Object.keys(currentWeeklySnapshot.typeCategories || {}).length > 0
-                ? currentWeeklySnapshot.typeCategories
-                : loadedTypeCategories;
-              initialPreviousWeeks = await loadPreviousWeeksBatch(
-                u.uid,
-                historyPlan.previousWeekIsos.slice(0, INITIAL_HISTORY_PRIORITY_COUNT),
-                historyPlan.startMondayISO,
-                fallbackCustomTypes,
-                fallbackTypeCategories,
-              );
-            } catch (e) {
-              console.warn('[WT] Failed to load recent history', e);
-            }
-          }
-
           setPreviousWeeks(initialPreviousWeeks);
+          setWeekSource('server');
           weeklyLoadReadyRef.current = true;
           setInitialized(true);
         } else {
@@ -925,6 +947,9 @@ export default function WorkoutTrackerApp() {
     };
   }, [countdownRunning, countdownEndAt]);
 
+  const showWeekPlaceholder = !authResolved || (Boolean(userId) && weekSource === 'default');
+  const weekSyncing = Boolean(userId) && weekSource === 'cache';
+
   return (
   <div className="relative z-10 min-h-screen overflow-x-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 px-4 py-6 text-slate-900 sm:p-6">
       {/* Mindfulness overlay when weekly Mindfulness goal met */}
@@ -1008,6 +1033,17 @@ export default function WorkoutTrackerApp() {
                               Edit Profile
                             </button>
 
+                            <button
+                              onClick={() => {
+                                setShowUserDropdown(false);
+                                openTrends();
+                              }}
+                              className="w-full px-4 py-2 text-sm text-left text-slate-700 hover:bg-slate-50 flex items-center gap-3"
+                            >
+                              <TrendingUp className="h-4 w-4" />
+                              Long-term trends
+                            </button>
+
                             {/* Log Out Option */}
                             <button
                               onClick={() => {
@@ -1077,9 +1113,14 @@ export default function WorkoutTrackerApp() {
           </div>
 
           {/* Weekly Overview Dashboard */}
-          <WeeklyOverview weekly={weekly} previousWeeks={previousWeeks} />
+          {showWeekPlaceholder || showTrends ? null : <WeeklyOverview weekly={weekly} previousWeeks={previousWeeks} />}
         </header>
 
+        {showTrends ? (
+          <Suspense fallback={<div className="flex items-center gap-2 py-10 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading...</div>}>
+            <TrendsView userId={userId} currentWeek={weekly} onBack={closeTrends} />
+          </Suspense>
+        ) : (
         <Tabs defaultValue="week" value={activeTab} onValueChange={setActiveTab} className="">
           <TabsList className="grid h-auto w-full grid-cols-2 gap-1 overflow-hidden rounded-xl border border-slate-200 bg-white/80 p-1 shadow-sm backdrop-blur-sm sm:grid-cols-4 md:w-auto">
             <TabsTrigger value="week" className="min-h-[3rem] px-2 py-2 text-center text-xs leading-tight data-[state=active]:bg-blue-500 data-[state=active]:text-white sm:text-sm sm:!whitespace-nowrap !whitespace-normal">Weekly Tracker</TabsTrigger>
@@ -1089,14 +1130,34 @@ export default function WorkoutTrackerApp() {
           </TabsList>
 
       <TabsContent value="week" className="mt-4">
-        <WeeklyTracker
-          weekly={weekly}
-          setWeekly={setWeekly}
-          push={appToasts.push}
-          programStartDate={programStartDate}
-          onStartFresh={startFreshFromCurrentWeek}
-          previousWeeks={previousWeeks}
-        />
+        {showWeekPlaceholder ? (
+          <Card className="border-slate-200 bg-white/80">
+            <CardContent className="flex items-center gap-3 py-10 text-sm text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading your week...
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="relative">
+            {weekSyncing && (
+              <div className="pointer-events-none absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-slate-500 shadow-sm">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Syncing
+              </div>
+            )}
+            {/* Edits are held until the server copy lands so they can't be overwritten by it. */}
+            <div className={weekSyncing ? 'pointer-events-none select-none opacity-80' : undefined} aria-busy={weekSyncing}>
+              <WeeklyTracker
+                weekly={weekly}
+                setWeekly={setWeekly}
+                push={appToasts.push}
+                programStartDate={programStartDate}
+                onStartFresh={startFreshFromCurrentWeek}
+                previousWeeks={previousWeeks}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Weekly Benchmark Stack - Previous weeks as collapsible benchmark charts */}
         <WeeklyBenchmarkStack
@@ -1130,6 +1191,19 @@ export default function WorkoutTrackerApp() {
             }
           }}
         />
+
+        {userId && (
+          <div className="mt-6 flex justify-center">
+            <button
+              type="button"
+              onClick={openTrends}
+              className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 hover:underline"
+            >
+              <TrendingUp className="h-4 w-4" />
+              Monthly &amp; yearly trends
+            </button>
+          </div>
+        )}
       </TabsContent>
 
           <TabsContent value="workout" className="mt-4">
@@ -1147,6 +1221,7 @@ export default function WorkoutTrackerApp() {
           </TabsContent>
 
           <TabsContent value="library" className="mt-4">
+            <Suspense fallback={<div className="flex items-center gap-2 py-10 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading...</div>}>
             <LibraryView userName={userName} onLoadRoutine={(r, mode) => {
               if (mode === 'append') {
                 setSession((prev) => {
@@ -1165,8 +1240,10 @@ export default function WorkoutTrackerApp() {
               }
               setActiveTab('workout');
             }} />
+            </Suspense>
           </TabsContent>
         </Tabs>
+        )}
       </div>
         {/* Floating countdown button */}
         {showFloatingRestTimer && (

@@ -224,3 +224,10 @@ export function saveLocalRoutine(item: any) {
     localStorage.setItem(LS_ROUTINES, JSON.stringify(cur.slice(0, 100)));
   } catch (e) { console.warn('Failed to save local routine', e); }
 }
+
+export function deleteLocalRoutine(id: string) {
+  try {
+    const cur = loadLocalRoutines().filter((r) => r?.id !== id);
+    localStorage.setItem(LS_ROUTINES, JSON.stringify(cur));
+  } catch (e) { console.warn('Failed to delete local routine', e); }
+}

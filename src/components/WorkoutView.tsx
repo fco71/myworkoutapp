@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { auth, db } from "@/lib/firebase";
-import { doc, setDoc, collection, addDoc, getDocs, deleteDoc, getDoc } from "firebase/firestore";
+import { doc, setDoc, collection, addDoc, getDocs, deleteDoc } from "firebase/firestore";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,6 @@ import {
   Trash2,
   Check,
   Save,
-  Bookmark,
   ChevronDown,
   ChevronRight,
   MessageSquare,
@@ -29,6 +28,7 @@ import {
   useToasts,
   loadLocalRoutines,
   saveLocalRoutine,
+  deleteLocalRoutine,
   defaultSession,
   completedGuards,
   toISO,
@@ -671,12 +671,11 @@ export function WorkoutView({
   userName: string | null;
 }) {
   const toasts = useToasts();
-  const [pendingFavorites, setPendingFavorites] = useState<Set<string>>(new Set());
   const [timerSec, setTimerSec] = useState<number>(session.durationSec || 0);
   const [routines, setRoutines] = useState<any[]>([]);
   const [showLoadModal, setShowLoadModal] = useState(false);
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
-  const [sessionFavorited, setSessionFavorited] = useState<boolean>(false);
+  const [deletingRoutineId, setDeletingRoutineId] = useState<string | null>(null);
 
   // Save routine dialog state
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
@@ -699,48 +698,6 @@ export function WorkoutView({
     Boolean(session.sourceTemplateId) ||
     session.sessionName.trim() !== "Workout"
   );
-
-  // initialize whether current session (template) is favorited by the user
-  useEffect(() => {
-    let mounted = true;
-    let unsubscribe: (() => void) | undefined;
-
-    const initFav = async () => {
-      try {
-        const uid = auth.currentUser?.uid;
-        const itemId = session.sourceTemplateId;
-        if (!uid || !itemId) {
-          setSessionFavorited(false);
-          return;
-        }
-
-        // attach a snapshot listener for this user's favorites so UI stays in sync across tabs
-        const { onSnapshot } = await import('firebase/firestore');
-        unsubscribe = onSnapshot(collection(db, 'users', uid, 'favorites'), (snap) => {
-          try {
-            const favSet = new Set<string>();
-            snap.docs.forEach(d => {
-              const data = d.data() as any;
-              favSet.add(`${data.itemType||'routine'}::${data.itemId}`);
-            });
-            // write to shared cache
-            (window as any).__app_favorites_cache.map = favSet;
-            const favId = `routine::${itemId}`;
-            if (mounted) setSessionFavorited(favSet.has(favId));
-          } catch (e) { console.warn('favorites snapshot handling failed', e); }
-        });
-      } catch (e) {
-        console.warn('Failed to load session favorite', e);
-      }
-    };
-
-    void initFav();
-
-    return () => {
-      mounted = false;
-      unsubscribe?.();
-    };
-  }, [session.sourceTemplateId]);
 
   useEffect(() => {
     // Keep elapsed duration in sync without writing through a stale session object.
@@ -1041,6 +998,33 @@ export function WorkoutView({
     }
   };
 
+  const deleteRoutine = async (routine: any) => {
+    if (!window.confirm(`Delete routine "${routine.name || 'Untitled'}"? This cannot be undone.`)) return;
+    setDeletingRoutineId(routine.id);
+    try {
+      const uid = auth.currentUser?.uid;
+      if (!uid) {
+        deleteLocalRoutine(routine.id);
+      } else {
+        await deleteDoc(doc(db, 'users', uid, 'routines', routine.id));
+        // Drop any favorite that pointed at it so it doesn't linger in the Library
+        await deleteDoc(doc(db, 'users', uid, 'favorites', `routine::${routine.id}`)).catch(() => {});
+      }
+      setRoutines((prev) => {
+        const next = prev.filter((r) => r.id !== routine.id);
+        if (next.length === 0) setShowLoadModal(false);
+        return next;
+      });
+      if (selectedRoutineId === routine.id) setSelectedRoutineId(null);
+      toasts.push(`Deleted "${routine.name || 'Untitled'}"`, 'success');
+    } catch (e) {
+      console.error('Delete routine failed', e);
+      toasts.push('Delete failed', 'error');
+    } finally {
+      setDeletingRoutineId(null);
+    }
+  };
+
   // Show save dialog - first step
   const saveRoutine = async () => {
 
@@ -1106,86 +1090,6 @@ export function WorkoutView({
     }
   };
 
-  const toggleSessionFavorite = async () => {
-    try {
-      const uid = auth.currentUser?.uid;
-      if (!uid) return toasts.push('Sign in to favorite', 'info');
-
-      const itemId = session.sourceTemplateId;
-      const itemType = itemId ? 'routine' : null;
-
-      if (itemId) {
-        const favId = `${itemType}::${itemId}`;
-        if (pendingFavorites.has(favId)) return;
-
-        setPendingFavorites((prev) => new Set(prev).add(favId));
-        setSessionFavorited((current) => !current);
-
-        try {
-          const favRef = doc(db, 'users', uid, 'favorites', favId);
-          const favSnap = await getDoc(favRef);
-          if (favSnap.exists()) {
-            await deleteDoc(favRef);
-            toasts.push('Removed favorite', 'success');
-          } else {
-            await setDoc(favRef, { itemType, itemId, createdAt: Date.now() });
-            toasts.push('Favorited', 'success');
-          }
-        } catch (error) {
-          console.error('Favorite current session failed', error);
-          setSessionFavorited((current) => !current);
-          toasts.push('Failed', 'error');
-        } finally {
-          setPendingFavorites((prev) => {
-            const next = new Set(prev);
-            next.delete(favId);
-            return next;
-          });
-        }
-        return;
-      }
-
-      const payload = {
-        name: session.sessionName || 'Routine',
-        exercises: session.exercises.map((exercise) => ({
-          name: exercise.name,
-          minSets: exercise.minSets,
-          targetReps: exercise.targetReps,
-        })),
-        sessionTypes: session.sessionTypes || [],
-        createdAt: Date.now(),
-        public: false,
-        owner: uid,
-        ownerName: 'User',
-      };
-
-      const ref = collection(db, 'users', uid, 'routines');
-      const docRef = await addDoc(ref, payload as any);
-      const favId = `routine::${docRef.id}`;
-      setPendingFavorites((prev) => new Set(prev).add(favId));
-
-      try {
-        await setDoc(doc(db, 'users', uid, 'favorites', favId), {
-          itemType: 'routine',
-          itemId: docRef.id,
-          createdAt: Date.now(),
-        });
-        toasts.push('Saved routine and favorited', 'success');
-      } catch (error) {
-        console.error('Favorite current session failed', error);
-        toasts.push('Failed', 'error');
-      } finally {
-        setPendingFavorites((prev) => {
-          const next = new Set(prev);
-          next.delete(favId);
-          return next;
-        });
-      }
-    } catch (error) {
-      console.error('Favorite current session failed', error);
-      toasts.push('Failed', 'error');
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -1365,20 +1269,10 @@ export function WorkoutView({
                   variant="secondary"
                   onClick={saveRoutine}
                   disabled={isSaving}
-                  className="justify-start bg-slate-900 text-white hover:bg-slate-800"
+                  className="justify-start bg-slate-900 text-white hover:bg-slate-800 sm:col-span-2"
                 >
                   <Save className="mr-2 h-4 w-4" />
                   {isSaving ? 'Saving...' : 'Save as routine'}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={toggleSessionFavorite}
-                  title="Favorite this session"
-                  disabled={!!(session.sourceTemplateId && pendingFavorites.has(`routine::${session.sourceTemplateId}`))}
-                  className="justify-start border-slate-200 bg-white"
-                >
-                  <Bookmark className={cn('mr-2 h-4 w-4', sessionFavorited && 'fill-yellow-400 text-yellow-500')} />
-                  {sessionFavorited ? 'Favorited' : 'Favorite session'}
                 </Button>
                 <Button onClick={addExercise} className="justify-start bg-sky-600 text-white hover:bg-sky-700 sm:col-span-2">
                   <Plus className="mr-2 h-4 w-4" />
@@ -1545,13 +1439,25 @@ export function WorkoutView({
             <h3 className="text-lg font-semibold mb-4">Load a routine</h3>
             <div className="grid gap-2 max-h-72 overflow-y-auto">
               {routines.map((r) => (
-                <div key={r.id} className={cn('p-3 rounded border', selectedRoutineId === r.id && 'bg-slate-50 border-slate-300')} onClick={() => setSelectedRoutineId(r.id)}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="font-medium">{r.name}</div>
+                <div key={r.id} className={cn('p-3 rounded border cursor-pointer', selectedRoutineId === r.id && 'bg-slate-50 border-slate-300')} onClick={() => setSelectedRoutineId(r.id)}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-medium">{r.name || 'Untitled'}</div>
                       <div className="text-xs text-neutral-600">{(r.exercises || []).length} exercises</div>
                     </div>
-                    <div className="text-sm text-neutral-600">{(r.sessionTypes || []).join(', ')}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm text-neutral-600">{(r.sessionTypes || []).join(', ')}</div>
+                      <button
+                        type="button"
+                        title="Delete routine"
+                        aria-label={`Delete routine ${r.name || 'Untitled'}`}
+                        disabled={deletingRoutineId === r.id}
+                        onClick={(e) => { e.stopPropagation(); void deleteRoutine(r); }}
+                        className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
