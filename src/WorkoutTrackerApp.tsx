@@ -1161,6 +1161,7 @@ export default function WorkoutTrackerApp() {
 
         {/* Weekly Benchmark Stack - Previous weeks as collapsible benchmark charts */}
         <WeeklyBenchmarkStack
+          signedIn={Boolean(userId)}
           previousWeeks={previousWeeks}
           totalWeeks={historyWeekIsos.length}
           loadingMore={historyLoading}

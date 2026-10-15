@@ -214,8 +214,10 @@ export function WeeklyBenchmarkStack({
   totalWeeks,
   loadingMore,
   onLoadMore,
-  onUpdateWeek
+  onUpdateWeek,
+  signedIn = true,
 }: {
+  signedIn?: boolean;
   previousWeeks: WeeklyPlan[];
   totalWeeks: number;
   loadingMore: boolean;
@@ -252,6 +254,22 @@ export function WeeklyBenchmarkStack({
 
     return { weekDone };
   };
+
+  if (previousWeeks.length === 0 && (loadingMore || totalWeeks > 0)) {
+    return (
+      <div className="mt-8 p-6 text-center text-gray-500 bg-gray-50 rounded-lg">
+        <p>Loading previous weeks...</p>
+      </div>
+    );
+  }
+
+  if (previousWeeks.length === 0 && !signedIn) {
+    return (
+      <div className="mt-8 p-6 text-center text-gray-500 bg-gray-50 rounded-lg">
+        <p>Sign in to see your previous weeks</p>
+      </div>
+    );
+  }
 
   if (previousWeeks.length === 0) {
     return (
