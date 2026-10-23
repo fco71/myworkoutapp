@@ -219,7 +219,10 @@ function ExerciseCard({
         if (matchingSessions.length > 0) {
           // Get the exercise data from matching sessions
           const exerciseInstances = matchingSessions.map((session: any) => {
-            const exercise = session.exercises.find((e: any) => {
+            const exactExercise = session.exercises.find((e: any) =>
+              (e.name || '').replace(/['"]/g, '').toLowerCase().trim() === ex.name.toLowerCase().trim()
+            );
+            const exercise = exactExercise || session.exercises.find((e: any) => {
               const cleanStoredName = (e.name || '').replace(/['"]/g, '').toLowerCase().trim();
               const cleanSearchName = ex.name.toLowerCase().trim();
 
@@ -251,7 +254,14 @@ function ExerciseCard({
           }).filter(Boolean);
 
 
-          const performedExerciseInstances = exerciseInstances.filter(hasPerformedExercise);
+          // Prefer exact-name matches so e.g. "Bicep curl" doesn't take its last workout
+          // (and intensity) from a more recent "Incline bicep curl".
+          const performedFuzzy = exerciseInstances.filter(hasPerformedExercise);
+          const cleanSearchName = exerciseName.toLowerCase();
+          const performedExact = performedFuzzy.filter((e: any) =>
+            (e.name || '').replace(/['"]/g, '').toLowerCase().trim() === cleanSearchName
+          );
+          const performedExerciseInstances = performedExact.length > 0 ? performedExact : performedFuzzy;
 
           // Find last workout where this exercise was actually performed.
           const lastWorkout = performedExerciseInstances[0];

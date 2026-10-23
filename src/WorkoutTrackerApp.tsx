@@ -74,6 +74,26 @@ function normalizeLoadedSession(incomingSession: ResistanceSession) {
   };
 }
 
+// Turn last week's workout into a ready-to-start draft for the new week. Intensity is cleared
+// so each exercise card auto-fills it from that exercise's most recent saved workout, and the
+// history link is dropped so finishing creates a new entry instead of overwriting the old one.
+function toNewWeekDraft(previousSession: ResistanceSession): ResistanceSession {
+  return {
+    dateISO: toISO(new Date()),
+    sessionName: previousSession.sessionName || 'Workout',
+    exercises: (previousSession.exercises || []).map((e) => ({
+      ...e,
+      id: crypto.randomUUID(),
+      intensity: "",
+      sets: Array(e.minSets || e.sets?.length || 3).fill(0),
+    })),
+    completed: false,
+    sessionTypes: previousSession.sessionTypes || [],
+    durationSec: 0,
+    sourceTemplateId: previousSession.sourceTemplateId,
+  };
+}
+
 function persistRestDuration(seconds: number) {
   try {
     window.localStorage.setItem(LS_COUNTDOWN, String(seconds));
@@ -575,6 +595,7 @@ export default function WorkoutTrackerApp() {
               const previousWeekISO = historyPlan.previousWeekIsos[0];
               let benchmarksFromPrevWeek: Record<string, number> = {};
               let customTypesFromPrevWeek: string[] = [];
+              let sessionFromPrevWeek: ResistanceSession | null = null;
 
               if (previousWeekISO) {
                 try {
@@ -582,6 +603,9 @@ export default function WorkoutTrackerApp() {
                   const prevSnap = await getDocFromServer(prevWeekRef);
                   if (prevSnap.exists()) {
                     const prevData = prevSnap.data() as PersistedState;
+                    if (prevData?.session?.exercises?.length) {
+                      sessionFromPrevWeek = toNewWeekDraft(prevData.session);
+                    }
                     if (prevData?.weekly) {
                       benchmarksFromPrevWeek = prevData.weekly.benchmarks || {};
                       customTypesFromPrevWeek = prevData.weekly.customTypes || [];
@@ -616,7 +640,8 @@ export default function WorkoutTrackerApp() {
                   currentWeeklySnapshot = normalized;
                   setWeekly(normalized);
                 }
-                if (data?.session) setSession(normalizeLoadedSession(data.session));
+                // The legacy tracker doc is no longer written, so its session is stale (old
+                // intensities and sets). Never restore it; start from last week's workout instead.
               } else {
                 const defaultWk = defaultWeekly();
                 if (Object.keys(benchmarksFromPrevWeek).length > 0 || customTypesFromPrevWeek.length > 0) {
@@ -646,6 +671,8 @@ export default function WorkoutTrackerApp() {
                   }
                 }
               }
+
+              if (sessionFromPrevWeek) setSession(sessionFromPrevWeek);
             }
           } catch (e) {
             weeklyStateLoadFailed = true;
