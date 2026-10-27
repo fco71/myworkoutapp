@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { auth, db } from "@/lib/firebase";
 import { doc, setDoc, collection, addDoc, getDocs, deleteDoc } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,6 +55,11 @@ function getExerciseProgress(exercise: ResistanceExercise) {
 
 function hasPerformedExercise(exercise: { sets?: number[] }) {
   return (exercise.sets || []).some((reps) => (reps || 0) > 0);
+}
+
+function hasIntensity(value: unknown) {
+  const text = String(value ?? "").trim();
+  return text !== "" && text !== "0";
 }
 
 function formatDuration(totalSeconds: number) {
@@ -110,9 +116,12 @@ function ExerciseCard({
     .filter(Boolean);
 
   // Exercise history state
-  const [exerciseHistory, setExerciseHistory] = useState<{lastWorkout?: any; personalRecord?: any; recentWorkouts?: any[]}>({});
+  const [exerciseHistory, setExerciseHistory] = useState<{lastWorkout?: any; lastIntensity?: string | number; personalRecord?: any; recentWorkouts?: any[]}>({});
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // Cards can mount before sign-in finishes restoring; re-run the history load once it does.
+  const [uid, setUid] = useState(auth.currentUser?.uid);
+  useEffect(() => onAuthStateChanged(auth, (u) => setUid(u?.uid)), []);
 
   // Load exercise history
   useEffect(() => {
@@ -126,14 +135,13 @@ function ExerciseCard({
         exerciseName !== 'New exercise' &&
         exerciseName.length >= 2; // Minimum length check
 
-      if (!isValidExerciseName || historyLoading) {
+      if (!isValidExerciseName) {
         setExerciseHistory({});
         return;
       }
 
       setHistoryLoading(true);
       try {
-        const uid = auth.currentUser?.uid;
         if (!uid) {
           return;
         }
@@ -283,23 +291,30 @@ function ExerciseCard({
           });
           const recentWorkouts = Array.from(uniqueSessions.values()).slice(0, 5);
 
+          // The newest session can have a blank intensity (left empty that day), so carry over
+          // the most recent intensity that was actually recorded.
+          const lastIntensity = performedExerciseInstances.find((e: any) => hasIntensity(e.intensity))?.intensity;
+
           const historyData = {
             lastWorkout,
+            lastIntensity,
             personalRecord: personalRecord?.sets?.length ? personalRecord : null,
             recentWorkouts
           };
 
-          setExerciseHistory(historyData);
+          if (!cancelled) setExerciseHistory(historyData);
         } else {
           // Clear history if no completed sessions found
-          setExerciseHistory({});
+          if (!cancelled) setExerciseHistory({});
         }
       } catch (error) {
         console.error('Failed to load exercise history:', error);
       } finally {
-        setHistoryLoading(false);
+        if (!cancelled) setHistoryLoading(false);
       }
     };
+    // Ignore results from a load that a newer name/sign-in change has superseded.
+    let cancelled = false;
 
     // Only load history for valid exercise names
     const exerciseName = ex.name.trim();
@@ -316,20 +331,18 @@ function ExerciseCard({
       // Clear history for invalid names
       setExerciseHistory({});
     }
-  }, [ex.name]);
+    return () => { cancelled = true; };
+  }, [ex.name, uid]);
 
-  // Auto-fill intensity from last workout when history loads and none is set yet
+  // Auto-fill intensity from the last recorded one when history loads and none is set yet
   useEffect(() => {
     if (intensityAutoFilled.current) return;
-    const lastIntensity = exerciseHistory.lastWorkout?.intensity;
-    if (lastIntensity !== undefined && lastIntensity !== null && lastIntensity !== 0 && lastIntensity !== "") {
-      const current = ex.intensity;
-      if (current === 0 || current === "" || current === undefined) {
-        updateExercise(ex.id, { intensity: String(lastIntensity) });
-        intensityAutoFilled.current = true;
-      }
+    const { lastIntensity } = exerciseHistory;
+    if (hasIntensity(lastIntensity) && !hasIntensity(ex.intensity)) {
+      updateExercise(ex.id, { intensity: String(lastIntensity) });
+      intensityAutoFilled.current = true;
     }
-  }, [exerciseHistory.lastWorkout]);
+  }, [exerciseHistory.lastIntensity]);
 
   const { lastWorkout, personalRecord, recentWorkouts } = exerciseHistory;
   const hasHistory = lastWorkout || personalRecord || (recentWorkouts && recentWorkouts.length > 0);
