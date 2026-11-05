@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { auth, db } from "@/lib/firebase";
-import { doc, setDoc, collection, addDoc, getDocs, deleteDoc } from "firebase/firestore";
+import { doc, setDoc, collection, addDoc, getDocs, getDocsFromCache, getDocsFromServer, deleteDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -697,6 +697,8 @@ export function WorkoutView({
   const [timerSec, setTimerSec] = useState<number>(session.durationSec || 0);
   const [routines, setRoutines] = useState<any[]>([]);
   const [showLoadModal, setShowLoadModal] = useState(false);
+  const [routinesLoading, setRoutinesLoading] = useState(false);
+  const routinesRequestRef = useRef(0);
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
   const [deletingRoutineId, setDeletingRoutineId] = useState<string | null>(null);
 
@@ -999,31 +1001,61 @@ export function WorkoutView({
   };
 
   const loadRoutines = async () => {
-    // show modal selection — load routines into local state for modal
-    try {
-      const uid = auth.currentUser?.uid;
-      if (!uid) {
-        const items = loadLocalRoutines();
-  if (!items || items.length === 0) { toasts.push('No local routines saved', 'info'); return; }
-        setRoutines(items);
-        setShowLoadModal(true);
-        return;
-      }
-      const ref = collection(db, 'users', uid, 'routines');
-      const snaps = await getDocs(ref);
-      const items = snaps.docs.map((s) => ({ id: s.id, ...(s.data() as any) }));
-  if (items.length === 0) { toasts.push('No routines saved', 'info'); return; }
-      setRoutines(items);
+    // Open the modal immediately, fill it from the local Firestore cache, then
+    // refresh from the server in the background. Waiting on the server before
+    // opening made the button feel unresponsive on slow connections.
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      setRoutines(loadLocalRoutines() || []);
+      setRoutinesLoading(false);
       setShowLoadModal(true);
+      return;
+    }
+
+    const requestId = ++routinesRequestRef.current;
+    const isCurrent = () => routinesRequestRef.current === requestId;
+    const toItems = (snaps: Awaited<ReturnType<typeof getDocs>>) =>
+      snaps.docs.map((s) => ({ id: s.id, ...(s.data() as any) }));
+    const ref = collection(db, 'users', uid, 'routines');
+
+    setShowLoadModal(true);
+    setRoutinesLoading(true);
+
+    let hadCache = false;
+    try {
+      const cached = await getDocsFromCache(ref);
+      if (isCurrent() && !cached.empty) {
+        hadCache = true;
+        setRoutines(toItems(cached));
+      }
+    } catch {
+      // Nothing cached yet; fall through to the server fetch.
+    }
+
+    try {
+      const fresh = await getDocsFromServer(ref);
+      if (isCurrent()) setRoutines(toItems(fresh));
     } catch (e) {
       console.error('Load routines failed', e);
-  toasts.push('Load failed', 'error');
+      if (isCurrent() && !hadCache) toasts.push('Could not load routines', 'error');
+    } finally {
+      if (isCurrent()) setRoutinesLoading(false);
     }
+  };
+
+  const closeLoadModal = () => {
+    routinesRequestRef.current++;
+    setRoutinesLoading(false);
+    setShowLoadModal(false);
+    setSelectedRoutineId(null);
   };
 
   const deleteRoutine = async (routine: any) => {
     if (!window.confirm(`Delete routine "${routine.name || 'Untitled'}"? This cannot be undone.`)) return;
     setDeletingRoutineId(routine.id);
+    // Stop any in-flight refresh from re-adding the routine we're deleting
+    routinesRequestRef.current++;
+    setRoutinesLoading(false);
     try {
       const uid = auth.currentUser?.uid;
       if (!uid) {
@@ -1459,8 +1491,18 @@ export function WorkoutView({
       {showLoadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white rounded-lg p-6 w-full max-w-2xl">
-            <h3 className="text-lg font-semibold mb-4">Load a routine</h3>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h3 className="text-lg font-semibold">Load a routine</h3>
+              {routinesLoading && routines.length > 0 ? (
+                <span className="text-xs text-slate-500">Refreshing…</span>
+              ) : null}
+            </div>
             <div className="grid gap-2 max-h-72 overflow-y-auto">
+              {routines.length === 0 ? (
+                <div className="py-8 text-center text-sm text-slate-500">
+                  {routinesLoading ? 'Loading routines…' : 'No routines saved yet.'}
+                </div>
+              ) : null}
               {routines.map((r) => (
                 <div key={r.id} className={cn('p-3 rounded border cursor-pointer', selectedRoutineId === r.id && 'bg-slate-50 border-slate-300')} onClick={() => setSelectedRoutineId(r.id)}>
                   <div className="flex items-center justify-between gap-3">
@@ -1486,7 +1528,7 @@ export function WorkoutView({
               ))}
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <Button variant="outline" onClick={() => { setShowLoadModal(false); setSelectedRoutineId(null); }}>Cancel</Button>
+              <Button variant="outline" onClick={closeLoadModal}>Cancel</Button>
               <Button onClick={() => {
                 const found = routines.find((x) => x.id === selectedRoutineId);
                 if (!found) return toasts.push('Select a routine', 'info');
@@ -1503,8 +1545,7 @@ export function WorkoutView({
                   sourceTemplateId: found.id,
                   dateISO: toISO(new Date()),
                 });
-                setShowLoadModal(false);
-                setSelectedRoutineId(null);
+                closeLoadModal();
                 toasts.push(`Loaded "${found.name}". Press Start when ready.`, 'success');
               }}>Load selected</Button>
             </div>
