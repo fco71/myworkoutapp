@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
-import { auth, db } from "@/lib/firebase";
+import { auth, db, withClearedFields } from "@/lib/firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { collection, doc, getDoc, getDocFromCache, getDocFromServer, getDocs, getDocsFromServer, query, setDoc, where } from "firebase/firestore";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -889,7 +889,7 @@ export default function WorkoutTrackerApp() {
     // autosave to per-week document keyed by weekly.weekOfISO
     try {
       const ref = doc(db, "users", userId, "state", weekly.weekOfISO);
-      const payload: PersistedState = { weekly, session };
+      const payload: PersistedState = { weekly, session: withClearedFields(session) };
       setDoc(ref, payload, { merge: true }).catch(() => {});
     } catch (e) {
       console.warn('Autosave failed', e);

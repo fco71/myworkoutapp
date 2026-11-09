@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { auth, db } from "@/lib/firebase";
+import { auth, db, withClearedFields } from "@/lib/firebase";
 import { doc, setDoc, collection, addDoc, getDocs, getDocsFromCache, getDocsFromServer, deleteDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
@@ -930,7 +930,7 @@ export function WorkoutView({
         let sessionId = existingId;
         if (existingId) {
           // Editing/continuing a workout that already lives in history: update it in place.
-          await setDoc(doc(db, 'users', uid, 'sessions', existingId), payload as any, { merge: true });
+          await setDoc(doc(db, 'users', uid, 'sessions', existingId), withClearedFields(payload) as any, { merge: true });
         } else {
           const docRef = await addDoc(collection(db, 'users', uid, 'sessions'), payload as any);
           sessionId = docRef.id;
@@ -965,7 +965,7 @@ export function WorkoutView({
         const persistedSession = { ...session, completed: true, durationSec: finalDurationSec, completedAt, sourceSessionId: sessionId };
         reopenTarget = { ...persistedSession, completed: false, completedAt: undefined, startedAt: undefined };
         setSession(persistedSession);
-        await setDoc(doc(db, 'users', uid, 'state', nextWeekly.weekOfISO), { weekly: nextWeekly, session: persistedSession }, { merge: true });
+        await setDoc(doc(db, 'users', uid, 'state', nextWeekly.weekOfISO), { weekly: nextWeekly, session: withClearedFields(persistedSession) }, { merge: true });
       }
     } catch (e) {
       console.error('Failed to save completed session', e);
