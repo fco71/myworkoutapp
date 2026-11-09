@@ -1470,7 +1470,10 @@ export function WorkoutView({
         </CardContent>
       </Card>
 
-      {workoutActive && !session.completed ? (
+      {/* Floating save: shown while timing, and also while editing a saved/reopened workout
+          (Undo and Reopen clear startedAt, which would otherwise hide it and leave only the
+          Save button at the very bottom of the page). */}
+      {canFinishWorkout && (workoutActive || isEditingSaved || (session.durationSec || 0) > 0) ? (
         <div className="fixed bottom-24 right-6 z-40">
           <Button
             onClick={() => setShowFinishConfirm(true)}
@@ -1479,9 +1482,13 @@ export function WorkoutView({
             <Check className="mr-3 h-5 w-5" />
             <span className="flex flex-col items-start leading-tight">
               <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-100">
-                {workoutAutoCutoffReached ? "Timer cut off" : "Finish workout"}
+                {workoutActive
+                  ? (workoutAutoCutoffReached ? "Timer cut off" : "Finish workout")
+                  : isEditingSaved ? "Editing saved workout" : "Workout reopened"}
               </span>
-              <span className="text-sm font-semibold">Save {formatDuration(displayedTimerSec)}</span>
+              <span className="text-sm font-semibold">
+                {workoutActive ? `Save ${formatDuration(displayedTimerSec)}` : "Save changes"}
+              </span>
             </span>
           </Button>
         </div>
